@@ -1,7 +1,7 @@
-
 import axios from 'axios'
 import {
-  areJidsSameUser
+  areJidsSameUser,
+  generateWAMessageFromContent
 } from '@whiskeysockets/baileys'
 
 import config from '../config.js'
@@ -970,7 +970,9 @@ async function askMiku(
         {
           text:
             `@${sender_id} ${specialMsg}`,
-          mentions: [sender_jid]
+          mentions: sender_jid
+            ? [sender_jid]
+            : []
         },
         {
           quoted: m
@@ -1045,16 +1047,58 @@ Miku:`
     const mikuText =
       `${r}\n\n${userMention}`
 
-    await sock.sendMessage(
+    // JID REAL DEL USUARIO
+    const userJid =
+      String(sender_jid || '').trim()
+
+    if (!userJid) {
+      throw new Error(
+        'No se pudo obtener el JID del usuario.'
+      )
+    }
+
+    // Verificar que sea un JID válido
+    if (
+      !userJid.includes('@')
+    ) {
+      throw new Error(
+        `JID inválido: ${userJid}`
+      )
+    }
+
+    const botJid =
+      String(
+        sock.user?.jid ||
+        sock.user?.id ||
+        ''
+      ).trim()
+
+    const generated =
+      generateWAMessageFromContent(
+        m.chat,
+        {
+          extendedTextMessage: {
+            text: mikuText,
+
+            contextInfo: {
+              mentionedJid: [
+                userJid
+              ]
+            }
+          }
+        },
+        {
+          userJid:
+            botJid || userJid
+        }
+      )
+
+    await sock.relayMessage(
       m.chat,
+      generated.message,
       {
-        text: mikuText,
-        mentions: sender_jid
-          ? [sender_jid]
-          : []
-      },
-      {
-        quoted: m
+        messageId:
+          generated.key.id
       }
     )
 
@@ -1064,7 +1108,7 @@ Miku:`
 
     console.error(
       '[MIKU IA]',
-      error.message
+      error
     )
 
     await sock.sendMessage(
