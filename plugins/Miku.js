@@ -953,7 +953,6 @@ async function askMiku(
     !session.specialSent &&
     session.messages.length >= 3
   ) {
-
     const sadCount =
       session.messages.filter(
         item => isSad(item.text)
@@ -1047,61 +1046,16 @@ Miku:`
     const mikuText =
       `${r}\n\n${userMention}`
 
-    const userJid =
-      '0@s.whatsapp.net'
-
-    const STATUS_QUOTED = {
-      key: {
-        remoteJid: m.chat,
-        fromMe: false,
-        id: 'STATUS_FAKE'
-      },
-
-      message: {
-        groupStatusMentionMessage: {
-          message: {
-            protocolMessage: {
-              type:
-                'STATUS_MENTION_MESSAGE'
-            }
-          }
-        }
-      },
-
-      participant:
-        userJid
-    }
-
-    const generated =
-      generateWAMessageFromContent(
-        m.chat,
-        {
-          extendedTextMessage: {
-            text: mikuText,
-
-            contextInfo: {
-              mentionedJid:
-                sender_jid
-                  ? [sender_jid]
-                  : []
-            }
-          }
-        },
-        {
-          quoted:
-            STATUS_QUOTED,
-
-          userJid:
-            sock.user?.jid
-        }
-      )
-
-    await sock.relayMessage(
+    await sock.sendMessage(
       m.chat,
-      generated.message,
       {
-        messageId:
-          generated.key.id
+        text: mikuText,
+        mentions: sender_jid
+          ? [sender_jid]
+          : []
+      },
+      {
+        quoted: m
       }
     )
 
