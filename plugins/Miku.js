@@ -1,8 +1,7 @@
 
 import axios from 'axios'
 import {
-  areJidsSameUser,
-  generateWAMessageFromContent
+  areJidsSameUser
 } from '@whiskeysockets/baileys'
 
 import config from '../config.js'
