@@ -1362,4 +1362,4 @@ export default {
       senderJid
     )
   }
-        }
+}
