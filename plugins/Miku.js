@@ -28,111 +28,30 @@ function rawId(jid) {
     .split(':')[0]
 }
 
-// ───────────────────────────────────────────────────────────────
-// NORMALIZAR JID
-// ───────────────────────────────────────────────────────────────
-
-function normalizeJid(jid) {
-  const value =
-    String(jid || '')
-      .trim()
-
-  if (!value) return ''
-
-  /*
-   * Aceptamos únicamente JIDs que realmente tengan
-   * usuario + servidor.
-   */
-  if (!value.includes('@')) {
-    return ''
-  }
-
-  const [user, server] =
-    value.split('@')
-
-  if (!user || !server) {
-    return ''
-  }
-
-  return `${user}@${server}`
-}
-
-function validMentionJid(jid) {
-  const normalized =
-    normalizeJid(jid)
-
-  if (!normalized) {
-    return ''
-  }
-
-  /*
-   * No mandar grupos como mentions.
-   */
-  if (
-    normalized.endsWith('@g.us')
-  ) {
-    return ''
-  }
-
-  /*
-   * Para esta versión/fork de Baileys,
-   * usamos únicamente JIDs de usuario.
-   */
-  if (
-    normalized.endsWith('@s.whatsapp.net') ||
-    normalized.endsWith('@lid')
-  ) {
-    return normalized
-  }
-
-  return ''
-}
-
 function isOwner(jid) {
-  const raw =
-    rawId(jid)
+  const raw = rawId(jid)
 
-  for (
-    const o of config.owners || []
-  ) {
-    if (
-      cleanNum(o) === raw
-    ) {
-      return true
-    }
+  for (const o of config.owners || []) {
+    if (cleanNum(o) === raw) return true
   }
 
   return false
 }
 
 function sameUser(a, b) {
-  if (!a || !b) {
-    return false
-  }
+  if (!a || !b) return false
 
   try {
-    if (
-      areJidsSameUser(
-        a,
-        b
-      )
-    ) {
+    if (areJidsSameUser(a, b)) {
       return true
     }
   } catch {}
 
-  return (
-    rawId(a) ===
-    rawId(b)
-  )
+  return rawId(a) === rawId(b)
 }
 
-function participantCandidates(
-  participant
-) {
-  if (!participant) {
-    return []
-  }
+function participantCandidates(participant) {
+  if (!participant) return []
 
   const candidates = [
     participant.id,
@@ -166,12 +85,8 @@ function participantMatches(
 ) {
   return participantCandidates(
     participant
-  ).some(
-    candidate =>
-      sameUser(
-        candidate,
-        jid
-      )
+  ).some(candidate =>
+    sameUser(candidate, jid)
   )
 }
 
@@ -179,15 +94,13 @@ function findParticipant(
   participants,
   jid
 ) {
-  return (
-    participants || []
-  ).find(
-    participant =>
+  return (participants || [])
+    .find(participant =>
       participantMatches(
         participant,
         jid
       )
-  )
+    )
 }
 
 function isAdminParticipant(
@@ -214,9 +127,7 @@ function isAdminParticipant(
 function participantJid(
   participant
 ) {
-  if (!participant) {
-    return ''
-  }
+  if (!participant) return ''
 
   const phone =
     cleanNum(
@@ -230,10 +141,9 @@ function participantJid(
   const nonLid = [
     participant.jid,
     participant.id
-  ].find(
-    jid =>
-      !String(jid || '')
-        .endsWith('@lid')
+  ].find(jid =>
+    !String(jid || '')
+      .endsWith('@lid')
   )
 
   return (
@@ -289,33 +199,12 @@ async function sendMikuGroupMessage(
   text,
   mentions = []
 ) {
-  const safeMentions =
-    Array.isArray(mentions)
-      ? mentions
-          .map(
-            validMentionJid
-          )
-          .filter(Boolean)
-      : []
-
-  const content = {
-    text
-  }
-
-  /*
-   * IMPORTANTE:
-   * No enviamos mentions: [undefined].
-   */
-  if (
-    safeMentions.length
-  ) {
-    content.mentions =
-      safeMentions
-  }
-
   return conn.sendMessage(
     m.chat,
-    content,
+    {
+      text,
+      mentions
+    },
     {
       quoted: m
     }
@@ -342,13 +231,12 @@ function getPromotionTarget(
     Array.isArray(
       m.mentionedJid
     )
-      ? m.mentionedJid.find(
-          jid =>
-            jid &&
-            !sameUser(
-              jid,
-              botRaw
-            )
+      ? m.mentionedJid.find(jid =>
+          jid &&
+          !sameUser(
+            jid,
+            botRaw
+          )
         )
       : ''
 
@@ -530,12 +418,11 @@ async function handleAdminPromotion(
     ].filter(Boolean)
 
     if (
-      owners.some(
-        owner =>
-          participantMatches(
-            target,
-            owner
-          )
+      owners.some(owner =>
+        participantMatches(
+          target,
+          owner
+        )
       )
     ) {
       return sendMikuGroupMessage(
@@ -551,18 +438,11 @@ async function handleAdminPromotion(
         targetJid
       )
     ) {
-      const mentionJid =
-        validMentionJid(
-          targetJid
-        )
-
       return sendMikuGroupMessage(
         conn,
         m,
         `@${rawId(targetJid)} ya es administrador...`,
-        mentionJid
-          ? [mentionJid]
-          : []
+        [targetJid]
       )
     }
 
@@ -575,12 +455,10 @@ async function handleAdminPromotion(
 
     const failed =
       Array.isArray(result)
-        ? result.find(
-            item =>
-              String(
-                item?.status ||
-                '200'
-              ) !== '200'
+        ? result.find(item =>
+            String(
+              item?.status || '200'
+            ) !== '200'
           )
         : null
 
@@ -590,18 +468,11 @@ async function handleAdminPromotion(
       )
     }
 
-    const mentionJid =
-      validMentionJid(
-        targetJid
-      )
-
     return sendMikuGroupMessage(
       conn,
       m,
       `@${rawId(targetJid)}... desde ahora eres administrador.`,
-      mentionJid
-        ? [mentionJid]
-        : []
+      [targetJid]
     )
 
   } catch (error) {
@@ -722,9 +593,7 @@ function extractPluginName(t) {
   const normSet =
     new Map()
 
-  for (
-    const f of files
-  ) {
+  for (const f of files) {
     normSet.set(
       normalizePluginName(f),
       f
@@ -737,18 +606,16 @@ function extractPluginName(t) {
         /[\s.,!¿?();:;]+/
       )
       .filter(Boolean)
-      .map(
-        tok =>
-          tok.replace(
-            /\.js$/i,
-            ''
-          )
+      .map(tok =>
+        tok.replace(
+          /\.js$/i,
+          ''
+        )
       )
 
   const kept =
-    tokens.filter(
-      tk =>
-        !PLUGIN_NOISE.has(tk)
+    tokens.filter(tk =>
+      !PLUGIN_NOISE.has(tk)
     )
 
   if (!kept.length) {
@@ -843,7 +710,7 @@ async function handleMikuPlugins(
   const senderJid =
     m.sender ||
     m.key?.participant ||
-    ''
+    m.chat
 
   const senderRaw =
     rawId(senderJid)
@@ -853,14 +720,9 @@ async function handleMikuPlugins(
       ? `@${senderRaw}`
       : ''
 
-  const safeSenderJid =
-    validMentionJid(
-      senderJid
-    )
-
   const mentions =
-    safeSenderJid
-      ? [safeSenderJid]
+    senderJid
+      ? [senderJid]
       : []
 
   if (
@@ -877,9 +739,8 @@ async function handleMikuPlugins(
   const listText =
     formatPluginList(
       listPluginFiles()
-        .map(
-          f =>
-            stripExt(f)
+        .map(f =>
+          stripExt(f)
         )
     )
 
@@ -934,14 +795,10 @@ async function handleMikuPlugins(
       mentions
     )
 
-    const {
-      readFileSync
-    } =
+    const { readFileSync } =
       await import('fs')
 
-    const {
-      join
-    } =
+    const { join } =
       await import('path')
 
     const fileContent =
@@ -1055,7 +912,7 @@ function isSad(text) {
 }
 
 const specialMsg =
-  `Mmm... parece que estás pasando por un momento difícil. Está bien tomarse un descanso y hablar con alguien de confianza.`
+  `Mmm... no tienes que fingir que todo está bien. A veces simplemente necesitamos descansar un poco y hablar con alguien. Supongo que eso también está bien.`
 
 const leaveReqs =
   new Map()
@@ -1080,15 +937,10 @@ async function handleLeaveRequest(
   const senderJid =
     m.sender ||
     m.key?.participant ||
-    ''
+    m.chat
 
   const senderRaw =
     rawId(senderJid)
-
-  const safeSenderJid =
-    validMentionJid(
-      senderJid
-    )
 
   if (
     isOwner(senderJid)
@@ -1098,44 +950,28 @@ async function handleLeaveRequest(
       !String(m.chat || '')
         .endsWith('@g.us')
     ) {
-      const content = {
-        text:
-          `@${senderRaw} no estamos en un grupo.`
-      }
-
-      if (
-        safeSenderJid
-      ) {
-        content.mentions = [
-          safeSenderJid
-        ]
-      }
-
       return conn.sendMessage(
         m.chat,
-        content,
+        {
+          text:
+            `@${senderRaw} no estamos en un grupo.`,
+          mentions:
+            [senderJid]
+        },
         {
           quoted: m
         }
       )
     }
 
-    const content = {
-      text:
-        `@${senderRaw} ${goodbyeMsg}`
-    }
-
-    if (
-      safeSenderJid
-    ) {
-      content.mentions = [
-        safeSenderJid
-      ]
-    }
-
     await conn.sendMessage(
       m.chat,
-      content,
+      {
+        text:
+          `@${senderRaw} ${goodbyeMsg}`,
+        mentions:
+          [senderJid]
+      },
       {
         quoted: m
       }
@@ -1145,12 +981,11 @@ async function handleLeaveRequest(
       () => {
         conn.groupLeave(
           m.chat
-        ).catch(
-          e =>
-            console.error(
-              '[MIKU LEAVE]',
-              e.message
-            )
+        ).catch(e =>
+          console.error(
+            '[MIKU LEAVE]',
+            e.message
+          )
         )
       },
       2000
@@ -1163,34 +998,37 @@ async function handleLeaveRequest(
     `${m.chat}:${senderRaw}`
 
   const count =
-    (
-      leaveReqs.get(key) ||
-      0
-    ) + 1
+    (leaveReqs.get(key) || 0) +
+    1
 
   leaveReqs.set(
     key,
     count
   )
 
-  const content = {
-    text:
-      count >= 2
-        ? `@${senderRaw} ${onlyCreatorMsg}`
-        : `@${senderRaw} ${cluelessMsg}`
-  }
-
-  if (
-    safeSenderJid
-  ) {
-    content.mentions = [
-      safeSenderJid
-    ]
+  if (count >= 2) {
+    return conn.sendMessage(
+      m.chat,
+      {
+        text:
+          `@${senderRaw} ${onlyCreatorMsg}`,
+        mentions:
+          [senderJid]
+      },
+      {
+        quoted: m
+      }
+    )
   }
 
   return conn.sendMessage(
     m.chat,
-    content,
+    {
+      text:
+        `@${senderRaw} ${cluelessMsg}`,
+      mentions:
+        [senderJid]
+    },
     {
       quoted: m
     }
@@ -1209,32 +1047,18 @@ async function askMiku(
   sender_id,
   sender_jid
 ) {
-  /*
-   * Conservamos sender_jid.
-   * Pero lo normalizamos antes de mandarlo a Baileys.
-   */
-  const userJid =
-    validMentionJid(
-      sender_jid
-    )
-
-  const safeSenderId =
-    userJid
-      ? rawId(userJid)
-      : cleanNum(sender_id)
-
   const userName =
     m.pushName ||
-    safeSenderId ||
+    sender_id ||
     'desconocido'
 
   const userMention =
-    safeSenderId
-      ? `@${safeSenderId}`
+    sender_id
+      ? `@${sender_id}`
       : ''
 
   const sessionKey =
-    `${m.chat}:${safeSenderId || 'unknown'}`
+    `${m.chat}:${sender_id}`
 
   if (
     !sessions.has(
@@ -1273,7 +1097,6 @@ async function askMiku(
     !session.specialSent &&
     session.messages.length >= 3
   ) {
-
     const sadCount =
       session.messages.filter(
         item =>
@@ -1287,28 +1110,26 @@ async function askMiku(
           0.5
       )
     ) {
-
       session.specialSent =
         true
 
-      const content = {
-        text:
-          safeSenderId
-            ? `@${safeSenderId} ${specialMsg}`
-            : specialMsg
-      }
-
-      if (
-        userJid
-      ) {
-        content.mentions = [
-          userJid
-        ]
-      }
+      const specialJid =
+        String(
+          sender_jid || ''
+        ).trim()
 
       return sock.sendMessage(
         m.chat,
-        content,
+        {
+          text:
+            `@${sender_id} ${specialMsg}`,
+
+          mentions:
+            specialJid &&
+            specialJid.includes('@')
+              ? [specialJid]
+              : []
+        },
         {
           quoted: m
         }
@@ -1348,31 +1169,37 @@ Miku:`
 
   try {
 
-    sock
+    // ═════════════════════════════════════════════
+    // PRESENCIA
+    // ═════════════════════════════════════════════
+
+    await sock
       .sendPresenceUpdate(
         'composing',
         m.chat
       )
-      .catch(
-        () => {}
-      )
+      .catch(() => {})
 
-    sock
-      .readMessages([
-        m.key
-      ])
-      .catch(
-        () => {}
+    // ═════════════════════════════════════════════
+    // LEER MENSAJE
+    // ═════════════════════════════════════════════
+
+    await sock
+      .readMessages(
+        [m.key]
       )
+      .catch(() => {})
+
+    // ═════════════════════════════════════════════
+    // API GEMINI
+    // ═════════════════════════════════════════════
 
     const encoded =
       encodeURIComponent(
         promptText
       )
 
-    const {
-      data
-    } =
+    const { data } =
       await axios.get(
         `https://api-gohan-v1.onrender.com/ai/gemini?text=${encoded}`,
         {
@@ -1388,42 +1215,72 @@ Miku:`
       'Mmm... no sé qué decir.'
 
     const mikuText =
-      userMention
-        ? `${r}\n\n${userMention}`
-        : r
+      `${r}\n\n${userMention}`
 
-    /*
-     * userJid se conserva.
-     *
-     * Pero si está vacío NO se manda:
-     *
-     * mentions: [undefined]
-     *
-     * Ese era el tipo de dato que podía terminar
-     * provocando el jidDecode(undefined).
-     */
-    const content = {
-      text: mikuText
+    // ═════════════════════════════════════════════
+    // JID REAL DEL USUARIO
+    // ═════════════════════════════════════════════
+
+    const userJid =
+      String(
+        sender_jid || ''
+      ).trim()
+
+    // ═════════════════════════════════════════════
+    // JID REAL DEL CHAT
+    // ═════════════════════════════════════════════
+
+    const chatJid =
+      String(
+        m?.chat ||
+        m?.key?.remoteJid ||
+        ''
+      ).trim()
+
+    if (!chatJid) {
+      throw new Error(
+        'No se pudo obtener el JID del chat.'
+      )
     }
 
     if (
-      userJid
+      !chatJid.includes('@')
     ) {
-      content.mentions = [
-        userJid
-      ]
+      throw new Error(
+        `JID del chat inválido: ${chatJid}`
+      )
     }
 
-    /*
-     * IMPORTANTE:
-     * Usamos sendMessage normal.
-     *
-     * No usamos generateWAMessageFromContent.
-     * No usamos relayMessage.
-     */
+    // ═════════════════════════════════════════════
+    // MENCIONES
+    // ═════════════════════════════════════════════
+
+    const mentions =
+      userJid &&
+      userJid.includes('@')
+        ? [userJid]
+        : []
+
+    // ═════════════════════════════════════════════
+    // ENVÍO COMPATIBLE CON TU BAILEYS
+    // ═════════════════════════════════════════════
+    //
+    // NO usamos:
+    //
+    // generateWAMessageFromContent()
+    // relayMessage()
+    //
+    // Conservamos userJid para mentions.
+    // ═════════════════════════════════════════════
+
     await sock.sendMessage(
-      m.chat,
-      content,
+      chatJid,
+      {
+        text:
+          mikuText,
+
+        mentions
+      },
       {
         quoted: m
       }
@@ -1438,22 +1295,37 @@ Miku:`
       error
     )
 
+    // ═════════════════════════════════════════════
+    // SEGUNDO INTENTO SIN MENCIÓN
+    // ═════════════════════════════════════════════
+
     try {
 
-      await sock.sendMessage(
-        m.chat,
-        {
-          text:
-            'Mmm... ocurrió un error. Inténtalo otra vez.'
-        },
-        {
-          quoted: m
-        }
-      )
+      const fallbackChat =
+        String(
+          m?.chat ||
+          m?.key?.remoteJid ||
+          ''
+        ).trim()
 
-    } catch (
-      sendError
-    ) {
+      if (
+        fallbackChat &&
+        fallbackChat.includes('@')
+      ) {
+
+        await sock.sendMessage(
+          fallbackChat,
+          {
+            text:
+              'Mmm... ocurrió un error al procesar la respuesta. Inténtalo otra vez.'
+          },
+          {
+            quoted: m
+          }
+        )
+      }
+
+    } catch (sendError) {
 
       console.error(
         '[MIKU IA ERROR AL ENVIAR]',
@@ -1522,36 +1394,16 @@ export default {
       )
     }
 
-    /*
-     * Conservamos senderJid.
-     *
-     * Primero intentamos obtener el JID real
-     * del remitente.
-     */
     const senderJid =
       msg.sender ||
       msg.key?.participant ||
-      (
-        msg.key?.remoteJid?.endsWith(
-          '@s.whatsapp.net'
-        )
-          ? msg.key.remoteJid
-          : ''
-      )
-
-    const safeSenderJid =
-      validMentionJid(
-        senderJid
-      )
+      msg.key?.remoteJid ||
+      ''
 
     const senderId =
-      safeSenderJid
-        ? rawId(
-            safeSenderJid
-          )
-        : rawId(
-            senderJid
-          )
+      rawId(
+        senderJid
+      )
 
     return askMiku(
       sock,
@@ -1591,9 +1443,9 @@ export default {
       return
     }
 
-    // ─────────────────────────────────────────────────────────
+    // ═════════════════════════════════════════════
     // SALIR DEL GRUPO
-    // ─────────────────────────────────────────────────────────
+    // ═════════════════════════════════════════════
 
     if (
       normalizedText.includes(
@@ -1602,8 +1454,7 @@ export default {
       normalizedText.includes(
         'salte del grupo'
       ) ||
-      normalizedText ===
-        'salte'
+      normalizedText === 'salte'
     ) {
       return handleLeaveRequest(
         conn,
@@ -1611,9 +1462,9 @@ export default {
       )
     }
 
-    // ─────────────────────────────────────────────────────────
+    // ═════════════════════════════════════════════
     // CONTEXTO
-    // ─────────────────────────────────────────────────────────
+    // ═════════════════════════════════════════════
 
     const ctx =
       m?.message
@@ -1650,13 +1501,12 @@ export default {
       normalizedText.includes(
         'miku'
       ) ||
-      normalizedText ===
-        'ia' ||
+      normalizedText === 'ia' ||
       quotedFromBot
 
-    // ─────────────────────────────────────────────────────────
+    // ═════════════════════════════════════════════
     // ADMIN
-    // ─────────────────────────────────────────────────────────
+    // ═════════════════════════════════════════════
 
     if (
       addressedToMiku &&
@@ -1670,9 +1520,9 @@ export default {
       )
     }
 
-    // ─────────────────────────────────────────────────────────
+    // ═════════════════════════════════════════════
     // PLUGINS
-    // ─────────────────────────────────────────────────────────
+    // ═════════════════════════════════════════════
 
     if (
       addressedToMiku &&
@@ -1684,9 +1534,7 @@ export default {
           normalizedText
         )
 
-      if (
-        pluginIntent
-      ) {
+      if (pluginIntent) {
         return handleMikuPlugins(
           conn,
           m,
@@ -1695,9 +1543,9 @@ export default {
       }
     }
 
-    // ─────────────────────────────────────────────────────────
+    // ═════════════════════════════════════════════
     // RESPUESTA A MENSAJE DE MIKU
-    // ─────────────────────────────────────────────────────────
+    // ═════════════════════════════════════════════
 
     if (
       quotedFromBot
@@ -1706,18 +1554,7 @@ export default {
       const senderJid =
         m.sender ||
         m.key?.participant ||
-        (
-          m.key?.remoteJid?.endsWith(
-            '@s.whatsapp.net'
-          )
-            ? m.key.remoteJid
-            : ''
-        )
-
-      const safeSenderJid =
-        validMentionJid(
-          senderJid
-        )
+        m.chat
 
       return askMiku(
         conn,
@@ -1726,27 +1563,22 @@ export default {
         isOwner(
           senderJid
         ),
-        safeSenderJid
-          ? rawId(
-              safeSenderJid
-            )
-          : rawId(
-              senderJid
-            ),
+        rawId(
+          senderJid
+        ),
         senderJid
       )
     }
 
-    // ─────────────────────────────────────────────────────────
+    // ═════════════════════════════════════════════
     // SOLO SI DICEN MIKU O IA
-    // ─────────────────────────────────────────────────────────
+    // ═════════════════════════════════════════════
 
     if (
       !normalizedText.includes(
         'miku'
       ) &&
-      normalizedText !==
-        'ia'
+      normalizedText !== 'ia'
     ) {
       return
     }
@@ -1754,18 +1586,7 @@ export default {
     const senderJid =
       m.sender ||
       m.key?.participant ||
-      (
-        m.key?.remoteJid?.endsWith(
-          '@s.whatsapp.net'
-        )
-          ? m.key.remoteJid
-          : ''
-      )
-
-    const safeSenderJid =
-      validMentionJid(
-        senderJid
-      )
+      m.chat
 
     return askMiku(
       conn,
@@ -1774,13 +1595,9 @@ export default {
       isOwner(
         senderJid
       ),
-      safeSenderJid
-        ? rawId(
-            safeSenderJid
-          )
-        : rawId(
-            senderJid
-          ),
+      rawId(
+        senderJid
+      ),
       senderJid
     )
   }
