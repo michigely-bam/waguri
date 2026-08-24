@@ -965,14 +965,22 @@ async function askMiku(
     ) {
       session.specialSent = true
 
+      const specialJid =
+        String(sender_jid || '').trim()
+
+      const specialMentions =
+        specialJid &&
+        specialJid.includes('@')
+          ? [specialJid]
+          : []
+
       return sock.sendMessage(
         m.chat,
         {
           text:
-            `@${sender_id} ${specialMsg}`,
-          mentions: sender_jid
-            ? [sender_jid]
-            : []
+            `${sender_id} ${specialMsg}`,
+          mentions:
+            specialMentions
         },
         {
           quoted: m
@@ -1013,6 +1021,7 @@ Miku:`
 
   try {
 
+    // Mostrar que Miku está escribiendo
     sock
       .sendPresenceUpdate(
         'composing',
@@ -1020,9 +1029,12 @@ Miku:`
       )
       .catch(() => {})
 
-    sock
-      .readMessages([m.key])
-      .catch(() => {})
+    // Marcar el mensaje como leído
+    if (m.key) {
+      sock
+        .readMessages([m.key])
+        .catch(() => {})
+    }
 
     const encoded =
       encodeURIComponent(
@@ -1047,58 +1059,32 @@ Miku:`
     const mikuText =
       `${r}\n\n${userMention}`
 
+    // 22═════════════════════════════════════
     // JID REAL DEL USUARIO
+    // 22═════════════════════════════════════
+
     const userJid =
       String(sender_jid || '').trim()
 
-    if (!userJid) {
-      throw new Error(
-        'No se pudo obtener el JID del usuario.'
-      )
-    }
+    // Solo mencionar si tenemos un JID válido
+    const mentions =
+      userJid &&
+      userJid.includes('@')
+        ? [userJid]
+        : []
 
-    // Verificar que sea un JID válido
-    if (
-      !userJid.includes('@')
-    ) {
-      throw new Error(
-        `JID inválido: ${userJid}`
-      )
-    }
+    // 22══════════════════════════════════════
+    // ENVÍO NORMAL DE BAILEYS
+    // 22══════════════════════════════════════
 
-    const botJid =
-      String(
-        sock.user?.jid ||
-        sock.user?.id ||
-        ''
-      ).trim()
-
-    const generated =
-      generateWAMessageFromContent(
-        m.chat,
-        {
-          extendedTextMessage: {
-            text: mikuText,
-
-            contextInfo: {
-              mentionedJid: [
-                userJid
-              ]
-            }
-          }
-        },
-        {
-          userJid:
-            botJid || userJid
-        }
-      )
-
-    await sock.relayMessage(
+    await sock.sendMessage(
       m.chat,
-      generated.message,
       {
-        messageId:
-          generated.key.id
+        text: mikuText,
+        mentions
+      },
+      {
+        quoted: m
       }
     )
 
@@ -1111,16 +1097,27 @@ Miku:`
       error
     )
 
-    await sock.sendMessage(
-      m.chat,
-      {
-        text:
-          'Mmm... ocurrió un error. Inténtalo otra vez.'
-      },
-      {
-        quoted: m
-      }
-    )
+    try {
+
+      await sock.sendMessage(
+        m.chat,
+        {
+          text:
+            'Mmm... ocurrió un error. Inténtalo otra vez.'
+        },
+        {
+          quoted: m
+        }
+      )
+
+    } catch (sendError) {
+
+      console.error(
+        '[MIKU IA ERROR AL ENVIAR]',
+        sendError
+      )
+
+    }
 
     return
   }
