@@ -30,25 +30,48 @@ const telegramClient = new TelegramClient(
 let telegramConectado = false;
 
 // ======================================================
+// CONTROL DE DUPLICADOS
+// ======================================================
+
+// Guarda IDs de mensajes Telegram ya procesados
+const mensajesProcesados = new Set();
+
+const MAX_CACHE = 500;
+
+// ======================================================
+// BOTONES TELEGRAM → WHATSAPP
+// ======================================================
+
+// Guarda temporalmente los botones recibidos.
+// Sirve para saber qué botón de Telegram corresponde
+// a cada botón que mostramos en WhatsApp.
+
+global.TG_BUTTONS = global.TG_BUTTONS || new Map();
+
+// ======================================================
 // CONECTAR TELEGRAM
 // ======================================================
 
 async function conectarTelegram() {
+
+    if (!API_ID || !API_HASH || !STRING_SESSION) {
+        console.error(
+            "[TG] ❌ Faltan credenciales de Telegram."
+        );
+        return;
+    }
+
     try {
 
         await telegramClient.connect();
 
         telegramConectado = true;
 
-        const me =
-            await telegramClient.getMe();
+        // Solo comprobación interna.
+        await telegramClient.getMe();
 
         console.log(
-            `[TG] ✅ Conectado como @${me?.username || me?.firstName || "usuario"}`
-        );
-
-        console.log(
-            `[TG] 🎯 Solo escuchando @mjnumbers_bot`
+            "[TG] ✅ Telegram conectado."
         );
 
     } catch (error) {
@@ -56,27 +79,344 @@ async function conectarTelegram() {
         telegramConectado = false;
 
         console.error(
-            "[TG] ❌ Error conectando:",
+            "[TG] ❌ Error conectando Telegram:",
             error.message
         );
     }
 }
 
-if (
-    API_ID &&
-    API_HASH &&
-    STRING_SESSION
-) {
+if (API_ID && API_HASH && STRING_SESSION) {
     conectarTelegram();
 }
+
 // ======================================================
-// DELAY
+// OBTENER NOMBRE DEL BOTÓN
 // ======================================================
 
-const delay = ms =>
-    new Promise(resolve => setTimeout(resolve, ms));
+function obtenerTextoBoton(button) {
+
+    return (
+        button?.text ||
+        button?.label ||
+        "Opción"
+    );
+}
+
+// ======================================================
+// OBTENER DATOS DEL BOTÓN
+// ======================================================
+
+function obtenerDataBoton(button) {
+
+    try {
+
+        if (button?.data) {
+
+            if (Buffer.isBuffer(button.data)) {
+                return button.data.toString();
+            }
+
+            return String(button.data);
+        }
+
+        if (button?.url) {
+            return String(button.url);
+        }
+
+    } catch {}
+
+    return obtenerTextoBoton(button);
+}
+
+// ======================================================
+// EXTRAER BOTONES DE TELEGRAM
+// ======================================================
+
+function extraerBotones(msg) {
+
+    const resultado = [];
+
+    try {
+
+        const markup = msg?.replyMarkup;
+
+        if (!markup?.rows) {
+            return resultado;
+        }
+
+        for (
+            let filaIndex = 0;
+            filaIndex < markup.rows.length;
+            filaIndex++
+        ) {
+
+            const fila = markup.rows[filaIndex];
+
+            if (!fila?.buttons) continue;
+
+            for (
+                let botonIndex = 0;
+                botonIndex < fila.buttons.length;
+                botonIndex++
+            ) {
+
+                const boton = fila.buttons[botonIndex];
+
+                const texto =
+                    obtenerTextoBoton(boton);
+
+                const data =
+                    obtenerDataBoton(boton);
+
+                if (!texto) continue;
+
+                resultado.push({
+                    texto,
+                    data,
+                    fila: filaIndex,
+                    indice: botonIndex
+                });
+            }
+        }
+
+    } catch {}
+
+    return resultado;
+}
+
+// ======================================================
+// CREAR BOTONES PARA WHATSAPP
+// ======================================================
+
+function crearBotonesWhatsApp(msg) {
+
+    const botonesTelegram =
+        extraerBotones(msg);
+
+    if (!botonesTelegram.length) {
+        return null;
+    }
+
+    const botonesWA = [];
+
+    for (
+        let i = 0;
+        i < botonesTelegram.length;
+        i++
+    ) {
+
+        const boton = botonesTelegram[i];
+
+        const id =
+            `tg_${msg.id}_${i}`;
+
+        // Guardamos la relación
+        global.TG_BUTTONS.set(
+            id,
+            {
+                telegramMessage: msg,
+                data: boton.data,
+                texto: boton.texto,
+                indice: boton.indice,
+                fila: boton.fila
+            }
+        );
+
+        botonesWA.push({
+            buttonId: id,
+            buttonText: {
+                displayText: boton.texto
+            },
+            type: 1
+        });
+    }
+
+    // Evitar que crezca indefinidamente
+    while (
+        global.TG_BUTTONS.size > 300
+    ) {
+
+        const primero =
+            global.TG_BUTTONS.keys().next().value;
+
+        if (!primero) break;
+
+        global.TG_BUTTONS.delete(primero);
+    }
+
+    return botonesWA;
+}
+
+// ======================================================
+// ENVIAR RESPUESTA TELEGRAM → WHATSAPP
+// ======================================================
+
+async function enviarTelegramWhatsApp(msg) {
+
+    try {
+
+        if (!global.sock) return;
+
+        const destino =
+            global.TG_WA_CHAT ||
+            CHAT_WA_DESTINO;
+
+        if (!destino) return;
+
+        const texto =
+            msg.text ||
+            msg.message ||
+            "";
+
+        const botones =
+            crearBotonesWhatsApp(msg);
+
+        // ==================================================
+        // SIN MEDIA
+        // ==================================================
+
+        if (!msg.media) {
+
+            if (!texto.trim() && !botones) {
+                return;
+            }
+
+            const contenido = {
+                text:
+                    `╭⋯ 📥 *TELEGRAM* ⋯》\n` +
+                    `┊ ${texto || ""}\n` +
+                    `╰⋯ 》`
+            };
+
+            // Agregar botones solamente si existen
+            if (botones) {
+
+                contenido.buttons =
+                    botones;
+
+                contenido.headerType = 1;
+            }
+
+            await global.sock.sendMessage(
+                destino,
+                contenido
+            );
+
+            return;
+        }
+
+        // ==================================================
+        // MULTIMEDIA
+        // ==================================================
+
+        let media = null;
+
+        try {
+
+            media =
+                await telegramClient.downloadMedia(
+                    msg.media
+                );
+
+        } catch {}
+
+        if (!media) {
+
+            if (!texto.trim() && !botones) {
+                return;
+            }
+
+            const contenido = {
+                text:
+                    `╭⋯ 📥 *TELEGRAM* ⋯》\n` +
+                    `┊ ${texto || ""}\n` +
+                    `╰⋯ 》`
+            };
+
+            if (botones) {
+                contenido.buttons = botones;
+                contenido.headerType = 1;
+            }
+
+            await global.sock.sendMessage(
+                destino,
+                contenido
+            );
+
+            return;
+        }
+
+        const mediaClass =
+            msg.media?.className || "";
+
+        // ==================================================
+        // FOTO
+        // ==================================================
+
+        if (
+            mediaClass.includes("Photo")
+        ) {
+
+            await global.sock.sendMessage(
+                destino,
+                {
+                    image: media,
+
+                    caption:
+                        texto || undefined
+                }
+            );
+
+        }
+
+        // ==================================================
+        // DOCUMENTO
+        // ==================================================
+
+        else {
+
+            await global.sock.sendMessage(
+                destino,
+                {
+                    document: media,
+
+                    caption:
+                        texto || undefined
+                }
+            );
+        }
+
+        // ==================================================
+        // BOTONES DESPUÉS DE MEDIA
+        // ==================================================
+
+        if (botones) {
+
+            await global.sock.sendMessage(
+                destino,
+                {
+                    text:
+                        "Selecciona una opción:",
+
+                    buttons: botones,
+
+                    headerType: 1
+                }
+            );
+        }
+
+    } catch (error) {
+
+        console.error(
+            "[TG] ❌ Error enviando a WhatsApp:",
+            error.message
+        );
+    }
+}
+
 // ======================================================
 // TELEGRAM → WHATSAPP
+// SOLO MENSAJES NUEVOS
 // ======================================================
 
 telegramClient.addEventHandler(
@@ -85,18 +425,55 @@ telegramClient.addEventHandler(
         try {
 
             const msg =
-                event.message;
+                event?.message;
 
             if (!msg) return;
 
-            // Ignorar mensajes enviados por nuestra cuenta
+            // ==============================================
+            // NO PROCESAR MENSAJES PROPIOS
+            // ==============================================
+
             if (msg.out) return;
 
-            // ==================================================
-            // OBTENER REMITENTE
-            // ==================================================
+            // ==============================================
+            // EVITAR DUPLICADOS
+            // ==============================================
 
-            let sender;
+            const messageId =
+                String(msg.id);
+
+            if (
+                mensajesProcesados.has(messageId)
+            ) {
+                return;
+            }
+
+            mensajesProcesados.add(
+                messageId
+            );
+
+            if (
+                mensajesProcesados.size >
+                MAX_CACHE
+            ) {
+
+                const primero =
+                    mensajesProcesados.values()
+                        .next()
+                        .value;
+
+                if (primero) {
+                    mensajesProcesados.delete(
+                        primero
+                    );
+                }
+            }
+
+            // ==============================================
+            // OBTENER REMITENTE
+            // ==============================================
+
+            let sender = null;
 
             try {
 
@@ -108,171 +485,47 @@ telegramClient.addEventHandler(
                 return;
             }
 
-            const username =
-                sender?.username
-                    ?.toLowerCase() || "";
+            if (!sender) return;
 
-            // ==================================================
-            // FILTRO PRINCIPAL
-            // SOLO MJNUMBERS_BOT
-            // ==================================================
+            const username =
+                sender.username
+                    ? sender.username.toLowerCase()
+                    : "";
+
+            // ==============================================
+            // SOLO @MJnumbers_bot
+            // ==============================================
 
             if (
-                username !==
-                "mjnumbers_bot"
+                username !== "mjnumbers_bot"
             ) {
                 return;
             }
 
-            // Desde aquí solamente se procesa
-            // contenido de @MJnumbers_bot.
-
-            console.log(
-                "[TG → WA] 📥 Respuesta de @MJnumbers_bot"
-            );
-
-            // ==================================================
+            // ==============================================
             // WHATSAPP
-            // ==================================================
+            // ==============================================
 
-            if (!global.sock) {
-                return;
-            }
+            if (!global.sock) return;
 
             const destino =
                 global.TG_WA_CHAT ||
                 CHAT_WA_DESTINO;
 
-            if (!destino) {
-                return;
-            }
+            if (!destino) return;
 
-            // ==================================================
-            // TEXTO
-            // ==================================================
+            // ==============================================
+            // ENVIAR
+            // ==============================================
 
-            const texto =
-                msg.text ||
-                msg.message ||
-                "";
-
-            // ==================================================
-            // TEXTO SIN MULTIMEDIA
-            // ==================================================
-
-            if (!msg.media) {
-
-                if (!texto.trim()) {
-                    return;
-                }
-
-                await global.sock.sendMessage(
-                    destino,
-                    {
-                        text:
-                            `╭⋯ 📥 *TELEGRAM* ⋯》\n` +
-                            `┊ ${texto}\n` +
-                            `╰⋯ 》`
-                    }
-                );
-
-                return;
-            }
-
-            // ==================================================
-            // MULTIMEDIA
-            // ==================================================
-
-            try {
-
-                const media =
-                    await telegramClient.downloadMedia(
-                        msg.media
-                    );
-
-                if (!media) {
-
-                    if (texto.trim()) {
-
-                        await global.sock.sendMessage(
-                            destino,
-                            {
-                                text: texto
-                            }
-                        );
-                    }
-
-                    return;
-                }
-
-                const mediaClass =
-                    msg.media.className || "";
-
-                // FOTO
-                if (
-                    mediaClass.includes("Photo")
-                ) {
-
-                    await global.sock.sendMessage(
-                        destino,
-                        {
-                            image: media,
-                            caption:
-                                texto || undefined
-                        }
-                    );
-                }
-
-                // DOCUMENTO
-                else if (
-                    mediaClass.includes("Document")
-                ) {
-
-                    await global.sock.sendMessage(
-                        destino,
-                        {
-                            document: media,
-                            caption:
-                                texto || undefined
-                        }
-                    );
-                }
-
-                // OTRO
-                else {
-
-                    await global.sock.sendMessage(
-                        destino,
-                        {
-                            document: media,
-                            caption:
-                                texto || undefined
-                        }
-                    );
-                }
-
-            } catch (mediaError) {
-
-                console.error(
-                    "[TG → WA] ❌ Error multimedia:",
-                    mediaError.message
-                );
-
-                if (texto.trim()) {
-
-                    await global.sock.sendMessage(
-                        destino,
-                        {
-                            text: texto
-                        }
-                    );
-                }
-            }
+            await enviarTelegramWhatsApp(
+                msg
+            );
 
         } catch (error) {
 
             console.error(
-                "[TG → WA] ❌ Error:",
+                "[TG] ❌ Error:",
                 error.message
             );
         }
@@ -314,26 +567,33 @@ export default {
         { args }
     ) {
 
+        // ==============================================
+        // GUARDAR SOCKET
+        // ==============================================
+
         global.sock = sock;
+
+        // ==============================================
+        // CHAT ACTUAL
+        // ==============================================
 
         const from =
             msg.key.remoteJid;
 
-        // El chat que ejecutó /tg recibirá la respuesta
-        global.TG_WA_CHAT = from;
+        // Este chat recibirá las respuestas
+        // futuras de @MJnumbers_bot.
 
-        const senderName =
-            msg.pushName ||
-            "Usuario";
+        global.TG_WA_CHAT =
+            from;
 
         const mensaje =
             args
                 .join(" ")
                 .trim();
 
-        // ==================================================
+        // ==============================================
         // TELEGRAM
-        // ==================================================
+        // ==============================================
 
         if (!telegramConectado) {
 
@@ -349,9 +609,9 @@ export default {
             );
         }
 
-        // ==================================================
-        // MENSAJE VACÍO
-        // ==================================================
+        // ==============================================
+        // SIN MENSAJE
+        // ==============================================
 
         if (!mensaje) {
 
@@ -361,7 +621,7 @@ export default {
                     text:
                         "❌ Escribe un mensaje.\n\n" +
                         "Ejemplo:\n" +
-                        "/tg memes"
+                        "/tg Get Number"
                 },
                 {
                     quoted: msg
@@ -369,31 +629,38 @@ export default {
             );
         }
 
-        // ==================================================
-        // PROGRESO
-        // ==================================================
+        // ==============================================
+        // ENVIANDO
+        // ==============================================
 
-        const { key } =
-            await sock.sendMessage(
-                from,
-                {
-                    text:
-                        `╭⋯ 📡 *ENVIANDO A TELEGRAM* ⋯》\n` +
-                        `┊ [░░░░░░] 0%\n` +
-                        `╰⋯ 》`
-                },
-                {
-                    quoted: msg
-                }
-            );
+        let progreso;
 
         try {
 
-            let enviado = false;
+            progreso =
+                await sock.sendMessage(
+                    from,
+                    {
+                        text:
+                            `╭⋯ 📡 *ENVIANDO A TELEGRAM* ⋯》\n` +
+                            `┊ [░░░░░░] 0%\n` +
+                            `╰⋯ 》`
+                    },
+                    {
+                        quoted: msg
+                    }
+                );
 
-            // ==================================================
+        } catch {}
+
+        try {
+
+            let enviado =
+                false;
+
+            // ==========================================
             // MENSAJE CITADO
-            // ==================================================
+            // ==========================================
 
             const contextInfo =
                 msg.message
@@ -403,9 +670,9 @@ export default {
             const quoted =
                 contextInfo?.quotedMessage;
 
-            // ==================================================
+            // ==========================================
             // IMAGEN CITADA
-            // ==================================================
+            // ==========================================
 
             if (
                 quoted?.imageMessage
@@ -415,7 +682,6 @@ export default {
 
                     const media =
                         await sock.downloadMediaMessage({
-
                             key: {
                                 remoteJid:
                                     from,
@@ -438,24 +704,19 @@ export default {
                                 media,
 
                             caption:
-                                `De WA: ${senderName}\n\n${mensaje}`
+                                mensaje
                         }
                     );
 
-                    enviado = true;
+                    enviado =
+                        true;
 
-                } catch (error) {
-
-                    console.error(
-                        "[TG] ❌ Error imagen:",
-                        error.message
-                    );
-                }
+                } catch {}
             }
 
-            // ==================================================
+            // ==========================================
             // TEXTO
-            // ==================================================
+            // ==========================================
 
             if (!enviado) {
 
@@ -468,25 +729,30 @@ export default {
                 );
             }
 
-            // ==================================================
+            // ==========================================
             // FINAL
-            // ==================================================
+            // ==========================================
 
-            await delay(800);
+            if (progreso?.key) {
 
-            await sock.sendMessage(
-                from,
-                {
-                    text:
-                        `╭⋯ 📡 *ENVIADO* ⋯》\n` +
-                        `┊ [██████] 100%\n` +
-                        `┊ Destino: @MJnumbers_bot\n` +
-                        `╰⋯ 》`,
+                try {
 
-                    edit:
-                        key
-                }
-            );
+                    await sock.sendMessage(
+                        from,
+                        {
+                            text:
+                                `╭⋯ 📡 *ENVIADO* ⋯》\n` +
+                                `┊ [██████] 100%\n` +
+                                `┊ Destino: @MJnumbers_bot\n` +
+                                `╰⋯ 》`,
+
+                            edit:
+                                progreso.key
+                        }
+                    );
+
+                } catch {}
+            }
 
         } catch (error) {
 
