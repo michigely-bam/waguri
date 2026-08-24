@@ -10,7 +10,7 @@ const API_ID = Number(process.env.TELEGRAM_API_ID);
 const API_HASH = process.env.TELEGRAM_API_HASH;
 const STRING_SESSION = process.env.TELEGRAM_SESSION;
 
-const TELEGRAM_DESTINO = "@TlgramMovieSearch_Bot";
+const TELEGRAM_DESTINO = "@MJnumbers_bot";
 const CHAT_WA_DESTINO = process.env.WA_CHAT_DESTINO;
 
 // ======================================================
