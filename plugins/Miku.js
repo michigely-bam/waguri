@@ -1,4 +1,4 @@
-js
+
 import axios from 'axios'
 import {
   areJidsSameUser,
