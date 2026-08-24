@@ -1,6 +1,19 @@
-import { TelegramClient } from "teleproto";
-import { StringSession } from "teleproto/sessions/index.js";
-import { NewMessage } from "teleproto/events/index.js";
+import {
+    TelegramClient
+} from "teleproto";
+
+import {
+    StringSession
+} from "teleproto/sessions/index.js";
+
+import {
+    NewMessage
+} from "teleproto/events/index.js";
+
+import {
+    generateWAMessageFromContent
+} from "@whiskeysockets/baileys";
+
 import "dotenv/config";
 
 import fs from "fs";
@@ -10,37 +23,73 @@ import path from "path";
 // CONFIGURACIÓN
 // ======================================================
 
-const API_ID = Number(process.env.TELEGRAM_API_ID);
-const API_HASH = process.env.TELEGRAM_API_HASH;
-const STRING_SESSION = process.env.TELEGRAM_SESSION;
+const API_ID =
+    Number(process.env.TELEGRAM_API_ID);
 
-const TELEGRAM_DESTINO = "@MJnumbers_bot";
+const API_HASH =
+    process.env.TELEGRAM_API_HASH;
 
-// Último chat de WhatsApp usado con /tg
-const DESTINO_FILE = path.resolve("./tg_destination.json");
+const STRING_SESSION =
+    process.env.TELEGRAM_SESSION;
+
+const TELEGRAM_DESTINO =
+    "@MJnumbers_bot";
+
+const DESTINO_FILE =
+    path.resolve("./tg_destination.json");
 
 // ======================================================
-// ESTADO
+// ESTADO GLOBAL
+//
+// IMPORTANTE:
+//
+// Lo guardamos en global para que al recargar el plugin
+// NO se cree otro listener de Telegram.
+//
+// Esto evita:
+// respuesta → 2 mensajes
+// respuesta → 3 mensajes
+// respuesta → 4 mensajes
 // ======================================================
 
-let telegramConectado = false;
+if (!global.__TG_BRIDGE_STATE) {
 
-// Último mensaje existente antes de activar el listener
-let telegramUltimoId = 0;
+    global.__TG_BRIDGE_STATE = {
 
-// IDs ya procesados
-const mensajesProcesados = new Set();
+        telegramClient: null,
 
-// Listener actual
-let telegramHandler = null;
-let telegramEvent = null;
+        telegramConectado: false,
+
+        listenerActivo: false,
+
+        telegramUltimoId: 0,
+
+        mensajesProcesados:
+            new Set(),
+
+        botones:
+            new Map(),
+
+        ultimoDestino:
+            null,
+
+        handler:
+            null
+
+    };
+}
+
+const state =
+    global.__TG_BRIDGE_STATE;
 
 // ======================================================
 // DELAY
 // ======================================================
 
 const delay = ms =>
-    new Promise(resolve => setTimeout(resolve, ms));
+    new Promise(resolve =>
+        setTimeout(resolve, ms)
+    );
 
 // ======================================================
 // DESTINO WHATSAPP
@@ -54,18 +103,20 @@ function cargarDestino() {
             return null;
         }
 
-        const data = JSON.parse(
-            fs.readFileSync(
-                DESTINO_FILE,
-                "utf8"
-            )
-        );
+        const data =
+            JSON.parse(
+                fs.readFileSync(
+                    DESTINO_FILE,
+                    "utf8"
+                )
+            );
 
         if (
             data &&
             typeof data.chat === "string" &&
             data.chat.trim()
         ) {
+
             return data.chat;
         }
 
@@ -105,40 +156,36 @@ function guardarDestino(chat) {
     }
 }
 
-let ultimoDestino = cargarDestino();
+if (!state.ultimoDestino) {
 
-// ======================================================
-// VALIDACIÓN
-// ======================================================
-
-if (
-    !API_ID ||
-    !API_HASH ||
-    !STRING_SESSION
-) {
-
-    console.error(
-        "[TG] ❌ Faltan TELEGRAM_API_ID, TELEGRAM_API_HASH o TELEGRAM_SESSION"
-    );
+    state.ultimoDestino =
+        cargarDestino();
 }
 
 // ======================================================
 // CLIENTE TELEGRAM
 // ======================================================
 
-const telegramClient = new TelegramClient(
-    new StringSession(
-        STRING_SESSION || ""
-    ),
-    API_ID || 0,
-    API_HASH || "",
-    {
-        connectionRetries: 5
-    }
-);
+if (!state.telegramClient) {
+
+    state.telegramClient =
+        new TelegramClient(
+            new StringSession(
+                STRING_SESSION || ""
+            ),
+            API_ID || 0,
+            API_HASH || "",
+            {
+                connectionRetries: 5
+            }
+        );
+}
+
+const telegramClient =
+    state.telegramClient;
 
 // ======================================================
-// OBTENER ÚLTIMO MENSAJE DEL BOT
+// HISTORIAL
 // ======================================================
 
 async function marcarHistorial() {
@@ -154,108 +201,360 @@ async function marcarHistorial() {
             );
 
         if (
-            mensajes &&
+            Array.isArray(mensajes) &&
             mensajes.length
         ) {
 
-            telegramUltimoId =
+            state.telegramUltimoId =
                 Number(
                     mensajes[0]?.id || 0
                 );
 
         } else {
 
-            telegramUltimoId = 0;
+            state.telegramUltimoId = 0;
         }
 
     } catch (error) {
 
-        telegramUltimoId = 0;
+        state.telegramUltimoId = 0;
 
         console.error(
-            "[TG] ⚠️ No se pudo marcar historial:",
+            "[TG] Error marcando historial:",
             error.message
         );
     }
 }
 
 // ======================================================
-// QUITAR LISTENER ANTERIOR
+// EXTRAER BOTONES DE TELEGRAM
+//
+// teleproto normalmente expone los botones mediante:
+//
+// msg.replyMarkup.rows
+//
+// Cada fila contiene buttons.
+//
+// Intentamos varias propiedades para hacerlo compatible
+// con diferentes versiones.
 // ======================================================
 
-function quitarListenerTelegram() {
+function extraerBotonesTelegram(msg) {
 
-    if (
-        telegramHandler &&
-        telegramEvent
-    ) {
-
-        try {
-
-            telegramClient.removeEventHandler(
-                telegramHandler,
-                telegramEvent
-            );
-
-        } catch {}
-
-    }
-
-    telegramHandler = null;
-    telegramEvent = null;
-}
-
-// ======================================================
-// COMPROBAR MENSAJE
-// ======================================================
-
-async function esMensajeDeNox(msg) {
-
-    if (!msg) {
-        return false;
-    }
-
-    // Nunca procesar nuestros propios mensajes
-    if (msg.out) {
-        return false;
-    }
-
-    let sender;
+    const resultado = [];
 
     try {
 
-        sender =
-            await msg.getSender();
+        const rows =
+            msg?.replyMarkup?.rows || [];
 
-    } catch {
+        for (
+            const row of rows
+        ) {
 
-        return false;
+            const buttons =
+                row?.buttons || [];
+
+            for (
+                const button of buttons
+            ) {
+
+                const texto =
+                    button?.text ||
+                    button?.label ||
+                    button?.buttonText ||
+                    "";
+
+                if (!texto) {
+                    continue;
+                }
+
+                let accion =
+                    button?.data ||
+                    button?.callbackData ||
+                    button?.value ||
+                    texto;
+
+                if (
+                    Buffer.isBuffer(accion)
+                ) {
+
+                    accion =
+                        accion.toString();
+                }
+
+                resultado.push({
+
+                    texto:
+                        String(texto),
+
+                    accion:
+                        String(accion)
+
+                });
+
+                // Solo necesitamos 2 para la prueba.
+                if (
+                    resultado.length >= 2
+                ) {
+
+                    return resultado;
+                }
+            }
+        }
+
+    } catch (error) {
+
+        console.error(
+            "[TG] Error leyendo botones:",
+            error.message
+        );
     }
 
-    const username =
-        String(
-            sender?.username || ""
-        )
-        .toLowerCase()
-        .replace(/^@/, "");
-
-    return username === "mjnumbers_bot";
+    return resultado;
 }
 
 // ======================================================
-// ENVIAR TEXTO A WHATSAPP
+// FALLBACK
+//
+// Si teleproto no entrega replyMarkup, intentamos sacar
+// opciones simples del texto.
+//
+// Ejemplo:
+//
+// 1. Opción A
+// 2. Opción B
+//
+// o:
+//
+// Opción A
+// Opción B
 // ======================================================
 
-async function enviarTextoWhatsApp(
+function extraerOpcionesTexto(texto) {
+
+    const lineas =
+        String(texto || "")
+            .split("\n")
+            .map(x => x.trim())
+            .filter(Boolean);
+
+    const opciones = [];
+
+    for (
+        const linea of lineas
+    ) {
+
+        const limpia =
+            linea
+                .replace(
+                    /^\s*(?:[-•*]|\d+[.)])\s*/,
+                    ""
+                )
+                .trim();
+
+        if (!limpia) {
+            continue;
+        }
+
+        // Evitamos convertir textos demasiado largos
+        // en botones.
+
+        if (
+            limpia.length > 35
+        ) {
+            continue;
+        }
+
+        opciones.push({
+
+            texto:
+                limpia,
+
+            accion:
+                limpia
+
+        });
+
+        if (
+            opciones.length >= 2
+        ) {
+
+            break;
+        }
+    }
+
+    return opciones;
+}
+
+// ======================================================
+// CREAR BOTONES WHATSAPP
+// ======================================================
+
+async function enviarRespuestaConBotones(
+    destino,
+    texto,
+    opciones
+) {
+
+    if (
+        !global.sock
+    ) {
+
+        return;
+    }
+
+    const botones =
+        opciones.slice(0, 2);
+
+    // ==================================================
+    // GUARDAR ACCIONES
+    // ==================================================
+
+    const botonesWA = [];
+
+    for (
+        let i = 0;
+        i < botones.length;
+        i++
+    ) {
+
+        const boton =
+            botones[i];
+
+        const id =
+            `tg_btn_${Date.now()}_${i}_${Math.random()
+                .toString(36)
+                .slice(2, 7)}`;
+
+        state.botones.set(
+            id,
+            {
+                accion:
+                    boton.accion,
+
+                destino,
+
+                creado:
+                    Date.now()
+            }
+        );
+
+        botonesWA.push({
+
+            buttonId:
+                id,
+
+            buttonText: {
+
+                displayText:
+                    boton.texto
+                        .slice(0, 20)
+
+            },
+
+            type: 1
+
+        });
+    }
+
+    // ==================================================
+    // LIMPIAR BOTONES VIEJOS
+    // ==================================================
+
+    const ahora =
+        Date.now();
+
+    for (
+        const [
+            id,
+            info
+        ] of state.botones
+    ) {
+
+        if (
+            ahora -
+            Number(info?.creado || 0)
+            >
+            10 * 60 * 1000
+        ) {
+
+            state.botones.delete(id);
+        }
+    }
+
+    // ==================================================
+    // MENSAJE CON BOTONES
+    // ==================================================
+
+    try {
+
+        const msg =
+            generateWAMessageFromContent(
+                destino,
+                {
+                    buttonsMessage: {
+
+                        contentText:
+                            texto,
+
+                        footerText:
+                            "✦ Telegram ↔ WhatsApp ✦",
+
+                        buttons:
+                            botonesWA,
+
+                        headerType: 1
+
+                    }
+                },
+                {}
+            );
+
+        await global.sock.relayMessage(
+            destino,
+            msg.message,
+            {
+                messageId:
+                    msg.key.id
+            }
+        );
+
+    } catch (error) {
+
+        console.error(
+            "[TG BUTTONS] Error:",
+            error.message
+        );
+
+        // Si los botones fallan,
+        // mandamos el texto normal.
+
+        await global.sock.sendMessage(
+            destino,
+            {
+                text:
+                    texto
+            }
+        );
+    }
+}
+
+// ======================================================
+// ENVIAR RESPUESTA NORMAL
+// ======================================================
+
+async function enviarTexto(
     destino,
     texto
 ) {
 
     if (
-        !destino ||
         !texto ||
-        !texto.trim()
+        !texto.trim() ||
+        !global.sock
     ) {
+
         return;
     }
 
@@ -286,93 +585,106 @@ async function procesarTelegram(event) {
         }
 
         // ==================================================
+        // MENSAJES PROPIOS
+        // ==================================================
+
+        if (msg.out) {
+            return;
+        }
+
+        // ==================================================
         // ID
         // ==================================================
 
         const messageId =
-            Number(
-                msg.id || 0
-            );
-
-        if (!messageId) {
-            return;
-        }
+            Number(msg.id || 0);
 
         // ==================================================
-        // BLOQUEAR HISTORIAL
+        // HISTORIAL
         // ==================================================
 
         if (
+            messageId &&
             messageId <=
-            telegramUltimoId
+            state.telegramUltimoId
         ) {
+
             return;
         }
 
         // ==================================================
-        // EVITAR DUPLICADOS
+        // DUPLICADOS
         // ==================================================
 
-        if (
-            mensajesProcesados.has(
-                messageId
-            )
-        ) {
-            return;
-        }
+        if (messageId) {
 
-        // Reservamos el ID inmediatamente
-        mensajesProcesados.add(
-            messageId
-        );
-
-        // Limpiar memoria
-        if (
-            mensajesProcesados.size > 1000
-        ) {
-
-            const ids =
-                [...mensajesProcesados]
-                    .slice(0, 500);
-
-            for (
-                const id of ids
+            if (
+                state.mensajesProcesados
+                    .has(messageId)
             ) {
 
-                mensajesProcesados.delete(
-                    id
-                );
+                return;
             }
+
+            state.mensajesProcesados.add(
+                messageId
+            );
         }
 
         // ==================================================
-        // SOLO @MJNUMBERS_BOT
+        // REMITENTE
         // ==================================================
 
-        const correcto =
-            await esMensajeDeNox(msg);
+        let sender;
 
-        if (!correcto) {
+        try {
+
+            sender =
+                await msg.getSender();
+
+        } catch {
+
+            return;
+        }
+
+        const username =
+            String(
+                sender?.username || ""
+            )
+            .toLowerCase();
+
+        // ==================================================
+        // SOLO MJNUMBERS
+        // ==================================================
+
+        if (
+            username !==
+            "mjnumbers_bot"
+        ) {
+
             return;
         }
 
         // ==================================================
-        // SOCKET WHATSAPP
+        // SOCKET
         // ==================================================
 
-        if (!global.sock) {
+        if (
+            !global.sock
+        ) {
+
             return;
         }
 
         // ==================================================
-        // ÚLTIMO DESTINO
+        // DESTINO
         // ==================================================
 
         const destino =
-            global.TG_WA_CHAT ||
-            ultimoDestino;
+            state.ultimoDestino;
 
         if (!destino) {
+
             return;
         }
 
@@ -385,17 +697,43 @@ async function procesarTelegram(event) {
                 msg.text ||
                 msg.message ||
                 ""
-            );
+            ).trim();
 
         // ==================================================
-        // SIN MULTIMEDIA
+        // BOTONES DE TELEGRAM
         // ==================================================
 
-        if (!msg.media) {
+        let opciones =
+            extraerBotonesTelegram(msg);
 
-            await enviarTextoWhatsApp(
+        // ==================================================
+        // FALLBACK POR TEXTO
+        // ==================================================
+
+        if (
+            opciones.length === 0 &&
+            texto
+        ) {
+
+            opciones =
+                extraerOpcionesTexto(
+                    texto
+                );
+        }
+
+        // ==================================================
+        // SI HAY BOTONES
+        // ==================================================
+
+        if (
+            opciones.length > 0
+        ) {
+
+            await enviarRespuestaConBotones(
                 destino,
-                texto
+                texto ||
+                    "Selecciona una opción:",
+                opciones
             );
 
             return;
@@ -405,174 +743,127 @@ async function procesarTelegram(event) {
         // MULTIMEDIA
         // ==================================================
 
-        try {
+        if (
+            msg.media
+        ) {
 
-            const media =
-                await telegramClient.downloadMedia(
-                    msg.media
-                );
+            try {
 
-            // No se pudo descargar
-            if (!media) {
+                const media =
+                    await telegramClient
+                        .downloadMedia(
+                            msg.media
+                        );
 
                 if (
-                    texto.trim()
+                    media
                 ) {
 
-                    await enviarTextoWhatsApp(
-                        destino,
-                        texto
-                    );
+                    const mediaClass =
+                        String(
+                            msg.media
+                                ?.className ||
+                            ""
+                        );
+
+                    // FOTO
+
+                    if (
+                        mediaClass.includes(
+                            "Photo"
+                        )
+                    ) {
+
+                        await global.sock
+                            .sendMessage(
+                                destino,
+                                {
+                                    image:
+                                        media,
+
+                                    caption:
+                                        texto ||
+                                        undefined
+                                }
+                            );
+
+                        return;
+                    }
+
+                    // DOCUMENTO
+
+                    await global.sock
+                        .sendMessage(
+                            destino,
+                            {
+                                document:
+                                    media,
+
+                                caption:
+                                    texto ||
+                                    undefined
+                            }
+                        );
+
+                    return;
                 }
 
-                return;
-            }
+            } catch (error) {
 
-            const mediaClass =
-                String(
-                    msg.media?.className ||
-                    ""
-                );
-
-            // ==================================================
-            // FOTO
-            // ==================================================
-
-            if (
-                mediaClass.includes(
-                    "Photo"
-                )
-            ) {
-
-                await global.sock.sendMessage(
-                    destino,
-                    {
-                        image: media,
-                        caption:
-                            texto ||
-                            undefined
-                    }
-                );
-
-                return;
-            }
-
-            // ==================================================
-            // DOCUMENTO
-            // ==================================================
-
-            if (
-                mediaClass.includes(
-                    "Document"
-                )
-            ) {
-
-                await global.sock.sendMessage(
-                    destino,
-                    {
-                        document: media,
-                        caption:
-                            texto ||
-                            undefined
-                    }
-                );
-
-                return;
-            }
-
-            // ==================================================
-            // OTRO TIPO DE MULTIMEDIA
-            // ==================================================
-
-            await global.sock.sendMessage(
-                destino,
-                {
-                    document: media,
-                    caption:
-                        texto ||
-                        undefined
-                }
-            );
-
-        } catch (error) {
-
-            console.error(
-                "[TG] ❌ Error multimedia:",
-                error.message
-            );
-
-            if (
-                texto.trim()
-            ) {
-
-                await enviarTextoWhatsApp(
-                    destino,
-                    texto
+                console.error(
+                    "[TG MEDIA]",
+                    error.message
                 );
             }
         }
 
+        // ==================================================
+        // TEXTO NORMAL
+        // ==================================================
+
+        await enviarTexto(
+            destino,
+            texto
+        );
+
     } catch (error) {
 
         console.error(
-            "[TG] ❌ Error procesando respuesta:",
+            "[TG] Error procesando:",
             error.message
         );
     }
 }
 
 // ======================================================
-// INICIAR LISTENER
+// LISTENER
 // ======================================================
 
-function iniciarListenerTelegram() {
+async function iniciarTelegram() {
 
-    // Primero eliminamos cualquier listener anterior
-    quitarListenerTelegram();
+    if (
+        state.listenerActivo
+    ) {
 
-    telegramEvent =
-        new NewMessage({
-            incoming: true
-        });
+        return;
+    }
 
-    telegramHandler =
-        async event => {
+    if (
+        !API_ID ||
+        !API_HASH ||
+        !STRING_SESSION
+    ) {
 
-            await procesarTelegram(
-                event
-            );
-        };
+        console.error(
+            "[TG] ❌ Faltan variables de Telegram."
+        );
 
-    telegramClient.addEventHandler(
-        telegramHandler,
-        telegramEvent
-    );
-}
-
-// ======================================================
-// CONECTAR TELEGRAM
-// ======================================================
-
-async function conectarTelegram() {
+        return;
+    }
 
     try {
 
-        // ==================================================
-        // CONECTAR
-        // ==================================================
-
         await telegramClient.connect();
-
-        // ==================================================
-        // IMPORTANTE
-        // ==================================================
-        //
-        // NO usamos catchUp().
-        //
-        // Así no procesamos actualizaciones pendientes
-        // que podrían corresponder a respuestas antiguas.
-        //
-        // ==================================================
 
         // ==================================================
         // MARCAR HISTORIAL ANTES DEL LISTENER
@@ -581,52 +872,55 @@ async function conectarTelegram() {
         await marcarHistorial();
 
         // ==================================================
-        // LIMPIAR IDS
+        // SOLO UN LISTENER
         // ==================================================
 
-        mensajesProcesados.clear();
+        if (
+            !state.listenerActivo
+        ) {
 
-        // ==================================================
-        // AHORA SÍ ESCUCHAR
-        // ==================================================
+            state.handler =
+                procesarTelegram;
 
-        iniciarListenerTelegram();
+            telegramClient.addEventHandler(
+                state.handler,
+                new NewMessage({
+                    incoming: true
+                })
+            );
 
-        telegramConectado =
+            state.listenerActivo =
+                true;
+        }
+
+        state.telegramConectado =
             true;
 
         const me =
             await telegramClient.getMe();
 
         console.log(
-            `[TG] ✅ Telegram conectado como @${me?.username || me?.firstName || "usuario"}`
+            `[TG] ✅ Conectado como @${me?.username || me?.firstName || "usuario"}`
         );
 
         console.log(
-            `[TG] 🎯 Solo @mjnumbers_bot`
+            "[TG] 🎯 Escuchando únicamente a @mjnumbers_bot"
         );
-
-        if (ultimoDestino) {
-
-            console.log(
-                `[TG] 📍 Destino guardado: ${ultimoDestino}`
-            );
-        }
 
     } catch (error) {
 
-        telegramConectado =
+        state.telegramConectado =
             false;
 
         console.error(
-            "[TG] ❌ Error conectando Telegram:",
+            "[TG] ❌ Error:",
             error.message
         );
     }
 }
 
 // ======================================================
-// INICIAR TELEGRAM
+// INICIAR
 // ======================================================
 
 if (
@@ -635,7 +929,7 @@ if (
     STRING_SESSION
 ) {
 
-    conectarTelegram();
+    iniciarTelegram();
 
 }
 
@@ -645,23 +939,205 @@ if (
 
 export default {
 
-    name: "bridge",
+    name:
+        "bridge",
 
     alias: [
         "tg",
         "send"
     ],
 
-    description:
-        "Puente WhatsApp ↔ Telegram",
-
-    category:
-        "herramientas",
-
     command: [
         "tg",
         "send"
     ],
+
+    description:
+        "Puente Telegram ↔ WhatsApp con botones",
+
+    category:
+        "herramientas",
+
+    // ==================================================
+    // BOTONES DE WHATSAPP
+    // ==================================================
+
+    async before(
+        m,
+        { conn }
+    ) {
+
+        try {
+
+            const from =
+                m?.chat ||
+                m?.key?.remoteJid;
+
+            if (!from) {
+                return;
+            }
+
+            // ==================================================
+            // DETECTAR BOTÓN
+            // ==================================================
+
+            const buttonId =
+                m?.buttonId ||
+                m?.selectedButtonId ||
+                m?.message
+                    ?.buttonsResponseMessage
+                    ?.selectedButtonId ||
+                m?.message
+                    ?.templateButtonReplyMessage
+                    ?.selectedId ||
+                m?.message
+                    ?.interactiveResponseMessage
+                    ?.nativeFlowResponseMessage
+                    ?.paramsJson;
+
+            if (
+                !buttonId
+            ) {
+
+                return;
+            }
+
+            let id =
+                String(
+                    buttonId
+                );
+
+            // nativeFlow puede devolver JSON
+            try {
+
+                const parsed =
+                    JSON.parse(id);
+
+                if (
+                    parsed?.id
+                ) {
+
+                    id =
+                        parsed.id;
+                }
+
+            } catch {}
+
+            // ==================================================
+            // SOLO NUESTROS BOTONES
+            // ==================================================
+
+            if (
+                !id.startsWith(
+                    "tg_btn_"
+                )
+            ) {
+
+                return;
+            }
+
+            const boton =
+                state.botones.get(id);
+
+            if (!boton) {
+
+                await conn.sendMessage(
+                    from,
+                    {
+                        text:
+                            "⚠️ Ese botón ya expiró. Usa /tg nuevamente."
+                    },
+                    {
+                        quoted: m
+                    }
+                );
+
+                return;
+            }
+
+            // ==================================================
+            // DESTINO ACTUAL
+            // ==================================================
+
+            const destino =
+                state.ultimoDestino ||
+                boton.destino;
+
+            if (
+                !destino
+            ) {
+
+                return;
+            }
+
+            // ==================================================
+            // ACCIÓN
+            // ==================================================
+
+            const accion =
+                String(
+                    boton.accion || ""
+                );
+
+            if (
+                !accion.trim()
+            ) {
+
+                return;
+            }
+
+            // ==================================================
+            // ELIMINAR PARA EVITAR DOBLE CLIC
+            // ==================================================
+
+            state.botones.delete(
+                id
+            );
+
+            // ==================================================
+            // ENVIAR ACCIÓN A TELEGRAM
+            // ==================================================
+
+            await telegramClient.sendMessage(
+                TELEGRAM_DESTINO,
+                {
+                    message:
+                        accion
+                }
+            );
+
+            // ==================================================
+            // AVISO
+            // ==================================================
+
+            await conn.sendMessage(
+                from,
+                {
+                    text:
+                        `📡 *Enviado a Telegram:*\n` +
+                        `${accion}`
+                },
+                {
+                    quoted: m
+                }
+            );
+
+            return true;
+
+        } catch (error) {
+
+            console.error(
+                "[TG BUTTON]",
+                error.message
+            );
+
+            return;
+        }
+    },
+
+    // ==================================================
+    // /TG
+    // ==================================================
 
     async execute(
         sock,
@@ -669,18 +1145,11 @@ export default {
         { args }
     ) {
 
-        // ==================================================
-        // SOCKET
-        // ==================================================
-
         global.sock =
             sock;
 
-        // ==================================================
-        // CHAT WHATSAPP
-        // ==================================================
-
         const from =
+            msg?.chat ||
             msg?.key?.remoteJid;
 
         if (!from) {
@@ -688,43 +1157,30 @@ export default {
         }
 
         // ==================================================
-        // GUARDAR ÚLTIMO DESTINO
+        // GUARDAR ÚLTIMO CHAT
         // ==================================================
 
-        global.TG_WA_CHAT =
-            from;
-
-        ultimoDestino =
+        state.ultimoDestino =
             from;
 
         guardarDestino(
             from
         );
 
-        // ==================================================
-        // MENSAJE
-        // ==================================================
-
-        const senderName =
-            msg.pushName ||
-            "Usuario";
-
         const mensaje =
             Array.isArray(args)
                 ? args.join(" ").trim()
-                : String(
-                    args || ""
-                ).trim();
+                : String(args || "").trim();
 
         // ==================================================
-        // TELEGRAM CONECTADO
+        // TELEGRAM
         // ==================================================
 
         if (
-            !telegramConectado
+            !state.telegramConectado
         ) {
 
-            return await sock.sendMessage(
+            return sock.sendMessage(
                 from,
                 {
                     text:
@@ -740,9 +1196,11 @@ export default {
         // SIN MENSAJE
         // ==================================================
 
-        if (!mensaje) {
+        if (
+            !mensaje
+        ) {
 
-            return await sock.sendMessage(
+            return sock.sendMessage(
                 from,
                 {
                     text:
@@ -757,159 +1215,35 @@ export default {
         }
 
         // ==================================================
-        // PROGRESO
-        // ==================================================
-
-        let progress;
-
-        try {
-
-            progress =
-                await sock.sendMessage(
-                    from,
-                    {
-                        text:
-                            `╭⋯ 📡 *ENVIANDO A TELEGRAM* ⋯》\n` +
-                            `┊ [░░░░░░] 0%\n` +
-                            `╰⋯ 》`
-                    },
-                    {
-                        quoted: msg
-                    }
-                );
-
-        } catch {}
-
-        // ==================================================
-        // ENVIAR
+        // ENVIAR A TELEGRAM
         // ==================================================
 
         try {
 
-            let enviado =
-                false;
-
-            // ==================================================
-            // MENSAJE CITADO
-            // ==================================================
-
-            const contextInfo =
-                msg?.message
-                    ?.extendedTextMessage
-                    ?.contextInfo;
-
-            const quoted =
-                contextInfo
-                    ?.quotedMessage;
-
-            // ==================================================
-            // IMAGEN CITADA
-            // ==================================================
-
-            if (
-                quoted?.imageMessage
-            ) {
-
-                try {
-
-                    const media =
-                        await sock.downloadMediaMessage(
-                            {
-                                key: {
-                                    remoteJid:
-                                        from,
-
-                                    id:
-                                        contextInfo?.stanzaId,
-
-                                    participant:
-                                        contextInfo?.participant
-                                },
-
-                                message:
-                                    quoted
-                            }
-                        );
-
-                    if (media) {
-
-                        await telegramClient.sendFile(
-                            TELEGRAM_DESTINO,
-                            {
-                                file:
-                                    media,
-
-                                caption:
-                                    `De WA: ${senderName}\n\n${mensaje}`
-                            }
-                        );
-
-                        enviado =
-                            true;
-                    }
-
-                } catch (error) {
-
-                    console.error(
-                        "[TG] ❌ Error enviando imagen:",
-                        error.message
-                    );
+            await telegramClient.sendMessage(
+                TELEGRAM_DESTINO,
+                {
+                    message:
+                        mensaje
                 }
-            }
+            );
 
-            // ==================================================
-            // TEXTO
-            // ==================================================
-
-            if (!enviado) {
-
-                await telegramClient.sendMessage(
-                    TELEGRAM_DESTINO,
-                    {
-                        message:
-                            mensaje
-                    }
-                );
-            }
-
-            // ==================================================
-            // PEQUEÑO DELAY
-            // ==================================================
-
-            await delay(500);
-
-            // ==================================================
-            // FINAL
-            // ==================================================
-
-            if (
-                progress?.key
-            ) {
-
-                try {
-
-                    await sock.sendMessage(
-                        from,
-                        {
-                            text:
-                                `╭⋯ 📡 *ENVIADO* ⋯》\n` +
-                                `┊ [██████] 100%\n` +
-                                `┊ Destino: @MJnumbers_bot\n` +
-                                `╰⋯ 》`,
-
-                            edit:
-                                progress.key
-                        }
-                    );
-
-                } catch {}
-
-            }
+            await sock.sendMessage(
+                from,
+                {
+                    text:
+                        `📡 *Enviado a @MJnumbers_bot*\n\n` +
+                        `${mensaje}`
+                },
+                {
+                    quoted: msg
+                }
+            );
 
         } catch (error) {
 
             console.error(
-                "[TG] ❌ Error enviando:",
+                "[TG SEND]",
                 error.message
             );
 
@@ -917,8 +1251,7 @@ export default {
                 from,
                 {
                     text:
-                        `❌ *Error enviando a Telegram*\n\n` +
-                        `┊ ${error.message}`
+                        `❌ Error enviando a Telegram:\n${error.message}`
                 },
                 {
                     quoted: msg
