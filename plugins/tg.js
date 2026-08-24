@@ -1,5 +1,6 @@
 import { TelegramClient } from "teleproto";
 import { StringSession } from "teleproto/sessions/index.js";
+import { NewMessage } from "teleproto/events/index.js";
 import "dotenv/config";
 
 // ======================================================
@@ -11,21 +12,24 @@ const API_HASH = process.env.TELEGRAM_API_HASH;
 const STRING_SESSION = process.env.TELEGRAM_SESSION;
 
 const TELEGRAM_DESTINO = "@MJnumbers_bot";
+
+// Opcional: si existe, será el destino por defecto.
+// Normalmente se usará global.TG_WA_CHAT.
 const CHAT_WA_DESTINO = process.env.WA_CHAT_DESTINO;
 
 // ======================================================
-// VALIDAR CONFIGURACIÓN
+// VALIDACIÓN
 // ======================================================
 
 if (!API_ID || !API_HASH || !STRING_SESSION) {
     console.error(
-        "[TG] ❌ Faltan credenciales de Telegram en .env"
+        "[TG] ❌ Faltan TELEGRAM_API_ID, TELEGRAM_API_HASH o TELEGRAM_SESSION"
     );
 }
 
 if (!CHAT_WA_DESTINO) {
-    console.error(
-        "[TG] ❌ Falta WA_CHAT_DESTINO en .env"
+    console.log(
+        "[TG] ℹ️ WA_CHAT_DESTINO no configurado. Se usará el chat que ejecute /tg."
     );
 }
 
@@ -37,7 +41,9 @@ const telegramClient = new TelegramClient(
     new StringSession(STRING_SESSION || ""),
     API_ID || 0,
     API_HASH || "",
-    {}
+    {
+        connectionRetries: 5
+    }
 );
 
 let telegramConectado = false;
@@ -52,8 +58,14 @@ async function conectarTelegram() {
 
         telegramConectado = true;
 
+        const me = await telegramClient.getMe();
+
         console.log(
-            "✅ Puente WhatsApp → @MJnumbers_bot conectado"
+            `[TG] ✅ Telegram conectado como @${me?.username || me?.firstName || "usuario"}`
+        );
+
+        console.log(
+            `[TG] 🎯 Escuchando respuestas de ${TELEGRAM_DESTINO}`
         );
 
     } catch (error) {
@@ -80,179 +92,238 @@ const delay = ms =>
 
 // ======================================================
 // TELEGRAM → WHATSAPP
-// ENVÍA TODO LO QUE MANDE @MJnumbers_bot
+// IMPORTANTE:
+// NewMessage es necesario para recibir mensajes nuevos.
 // ======================================================
 
-telegramClient.addEventHandler(async update => {
-
-    try {
-
-        if (!update?.message) return;
-
-        const msg = update.message;
-
-        // No procesar mensajes enviados por nuestra sesión
-        if (msg.out) return;
-
-        const sender = await msg.getSender();
-
-        if (!sender) return;
-
-        const username = sender.username
-            ? sender.username.toLowerCase()
-            : "";
-
-        // Solo aceptar mensajes de @MJnumbers_bot
-        if (username !== "mjnumbers_bot") return;
-
-        if (!global.sock) {
-            console.log(
-                "[TG → WA] ❌ WhatsApp no está conectado."
-            );
-            return;
-        }
-
-        if (!CHAT_WA_DESTINO) {
-            console.log(
-                "[TG → WA] ❌ WA_CHAT_DESTINO no configurado."
-            );
-            return;
-        }
-
-        const texto = msg.message || "";
-
-        // ==================================================
-        // MENSAJE DE TEXTO
-        // ==================================================
-
-        if (!msg.media) {
-
-            if (!texto.trim()) return;
-
-            await global.sock.sendMessage(
-                CHAT_WA_DESTINO,
-                {
-                    text: texto
-                }
-            );
-
-            console.log(
-                "[TG → WA] Texto enviado:",
-                texto.substring(0, 100)
-            );
-
-            return;
-        }
-
-        // ==================================================
-        // MULTIMEDIA
-        // ==================================================
+telegramClient.addEventHandler(
+    async event => {
 
         try {
 
-            const media =
-                await telegramClient.downloadMedia(msg.media);
+            const msg = event.message;
 
-            if (!media) {
+            if (!msg) return;
+
+            // Ignorar mensajes enviados por nuestra propia cuenta
+            if (msg.out) return;
+
+            console.log(
+                "[TG → WA] 📥 Nuevo mensaje recibido:",
+                msg.text || "[multimedia]"
+            );
+
+            // ==================================================
+            // OBTENER REMITENTE
+            // ==================================================
+
+            let sender = null;
+
+            try {
+                sender = await msg.getSender();
+            } catch (error) {
+                console.log(
+                    "[TG → WA] ⚠️ No se pudo obtener sender:",
+                    error.message
+                );
+            }
+
+            const username =
+                sender?.username
+                    ? sender.username.toLowerCase()
+                    : "";
+
+            const firstName =
+                sender?.firstName || "";
+
+            console.log(
+                `[TG → WA] 👤 Sender: @${username || "sin_username"} ${firstName}`
+            );
+
+            // ==================================================
+            // SOLO MJNUMBERS_BOT
+            // ==================================================
+
+            if (username !== "mjnumbers_bot") {
+
+                console.log(
+                    "[TG → WA] ⏭️ Mensaje ignorado: no es @MJnumbers_bot"
+                );
+
+                return;
+            }
+
+            // ==================================================
+            // COMPROBAR WHATSAPP
+            // ==================================================
+
+            if (!global.sock) {
+
+                console.log(
+                    "[TG → WA] ❌ global.sock todavía no existe."
+                );
+
+                return;
+            }
+
+            const destino =
+                global.TG_WA_CHAT ||
+                CHAT_WA_DESTINO;
+
+            if (!destino) {
+
+                console.log(
+                    "[TG → WA] ❌ No hay destino de WhatsApp."
+                );
+
+                return;
+            }
+
+            console.log(
+                "[TG → WA] 📍 Destino WhatsApp:",
+                destino
+            );
+
+            // ==================================================
+            // TEXTO
+            // ==================================================
+
+            const texto =
+                msg.text ||
+                msg.message ||
+                "";
+
+            // ==================================================
+            // SIN MULTIMEDIA
+            // ==================================================
+
+            if (!msg.media) {
+
+                if (!texto.trim()) return;
+
+                await global.sock.sendMessage(
+                    destino,
+                    {
+                        text:
+                            `╭⋯ 📥 *TELEGRAM* ⋯》\n` +
+                            `┊ ${texto}\n` +
+                            `╰⋯ 》`
+                    }
+                );
+
+                console.log(
+                    "[TG → WA] ✅ Texto enviado a WhatsApp."
+                );
+
+                return;
+            }
+
+            // ==================================================
+            // MULTIMEDIA
+            // ==================================================
+
+            try {
+
+                const media =
+                    await telegramClient.downloadMedia(
+                        msg.media
+                    );
+
+                if (!media) {
+
+                    if (texto.trim()) {
+
+                        await global.sock.sendMessage(
+                            destino,
+                            {
+                                text: texto
+                            }
+                        );
+                    }
+
+                    return;
+                }
+
+                const mediaClass =
+                    msg.media.className || "";
+
+                // FOTO
+                if (mediaClass.includes("Photo")) {
+
+                    await global.sock.sendMessage(
+                        destino,
+                        {
+                            image: media,
+                            caption: texto || undefined
+                        }
+                    );
+
+                }
+
+                // DOCUMENTO
+                else if (
+                    mediaClass.includes("Document")
+                ) {
+
+                    await global.sock.sendMessage(
+                        destino,
+                        {
+                            document: media,
+                            caption: texto || undefined
+                        }
+                    );
+
+                }
+
+                // OTRO
+                else {
+
+                    await global.sock.sendMessage(
+                        destino,
+                        {
+                            document: media,
+                            caption: texto || undefined
+                        }
+                    );
+                }
+
+                console.log(
+                    "[TG → WA] ✅ Multimedia enviada a WhatsApp."
+                );
+
+            } catch (mediaError) {
+
+                console.error(
+                    "[TG → WA] ❌ Error descargando multimedia:",
+                    mediaError.message
+                );
 
                 if (texto.trim()) {
 
                     await global.sock.sendMessage(
-                        CHAT_WA_DESTINO,
+                        destino,
                         {
                             text: texto
                         }
                     );
                 }
-
-                return;
             }
 
-            const mediaClass =
-                msg.media.className || "";
-
-            // ==================================================
-            // FOTO
-            // ==================================================
-
-            if (mediaClass.includes("Photo")) {
-
-                await global.sock.sendMessage(
-                    CHAT_WA_DESTINO,
-                    {
-                        image: media,
-                        caption: texto || undefined
-                    }
-                );
-
-            }
-
-            // ==================================================
-            // DOCUMENTO
-            // ==================================================
-
-            else if (
-                mediaClass.includes("Document") ||
-                mediaClass.includes("File")
-            ) {
-
-                await global.sock.sendMessage(
-                    CHAT_WA_DESTINO,
-                    {
-                        document: media,
-                        caption: texto || undefined
-                    }
-                );
-
-            }
-
-            // ==================================================
-            // OTRO TIPO DE MULTIMEDIA
-            // ==================================================
-
-            else {
-
-                await global.sock.sendMessage(
-                    CHAT_WA_DESTINO,
-                    {
-                        image: media,
-                        caption: texto || undefined
-                    }
-                );
-            }
-
-            console.log(
-                "[TG → WA] Multimedia enviada."
-            );
-
-        } catch (mediaError) {
+        } catch (error) {
 
             console.error(
-                "[TG → WA] ❌ Error con multimedia:",
-                mediaError.message
+                "[TG → WA] ❌ Error procesando mensaje:",
+                error
             );
-
-            // Si no se pudo enviar el archivo,
-            // al menos enviar el texto
-            if (texto.trim()) {
-
-                await global.sock.sendMessage(
-                    CHAT_WA_DESTINO,
-                    {
-                        text: texto
-                    }
-                );
-            }
         }
 
-    } catch (error) {
+    },
 
-        console.error(
-            "[TG → WA] ❌ Error:",
-            error.message
-        );
-    }
-});
+    // ESTE ES EL CAMBIO IMPORTANTE
+    new NewMessage({
+        incoming: true
+    })
+);
 
 // ======================================================
 // PLUGIN
@@ -268,7 +339,7 @@ export default {
     ],
 
     description:
-        "Puente directo con @MJnumbers_bot",
+        "Puente WhatsApp ↔ Telegram",
 
     category:
         "herramientas",
@@ -284,11 +355,17 @@ export default {
         { args }
     ) {
 
-        // Guardar conexión WhatsApp globalmente
+        // ==================================================
+        // GUARDAR WHATSAPP
+        // ==================================================
+
         global.sock = sock;
 
         const from =
             msg.key.remoteJid;
+
+        // Este será el chat al que volverá la respuesta
+        global.TG_WA_CHAT = from;
 
         const senderName =
             msg.pushName || "Usuario";
@@ -297,7 +374,7 @@ export default {
             args.join(" ").trim();
 
         // ==================================================
-        // COMPROBAR TELEGRAM
+        // TELEGRAM CONECTADO
         // ==================================================
 
         if (!telegramConectado) {
@@ -306,7 +383,7 @@ export default {
                 from,
                 {
                     text:
-                        "❌ El puente de Telegram todavía no está conectado."
+                        "❌ Telegram todavía no está conectado."
                 },
                 {
                     quoted: msg
@@ -315,25 +392,7 @@ export default {
         }
 
         // ==================================================
-        // COMPROBAR DESTINO
-        // ==================================================
-
-        if (!CHAT_WA_DESTINO) {
-
-            return await sock.sendMessage(
-                from,
-                {
-                    text:
-                        "❌ Falta configurar WA_CHAT_DESTINO en .env."
-                },
-                {
-                    quoted: msg
-                }
-            );
-        }
-
-        // ==================================================
-        // COMPROBAR MENSAJE
+        // MENSAJE
         // ==================================================
 
         if (!mensaje) {
@@ -344,7 +403,7 @@ export default {
                     text:
                         "❌ Escribe un mensaje.\n\n" +
                         "Ejemplo:\n" +
-                        ".tg hola"
+                        "/tg memes"
                 },
                 {
                     quoted: msg
@@ -353,7 +412,7 @@ export default {
         }
 
         // ==================================================
-        // MENSAJE DE PROGRESO
+        // PROGRESO
         // ==================================================
 
         const { key } =
@@ -361,7 +420,7 @@ export default {
                 from,
                 {
                     text:
-                        `╭⋯ 📡 *ENVIANDO* ⋯》\n` +
+                        `╭⋯ 📡 *ENVIANDO A TELEGRAM* ⋯》\n` +
                         `┊ [░░░░░░] 0%\n` +
                         `╰⋯ 》`
                 },
@@ -375,7 +434,7 @@ export default {
             let enviado = false;
 
             // ==================================================
-            // DETECTAR MENSAJE CITADO
+            // MENSAJE CITADO
             // ==================================================
 
             const contextInfo =
@@ -416,7 +475,7 @@ export default {
                             file: media,
 
                             caption:
-                                mensaje
+                                `De WA: ${senderName}\n\n${mensaje}`
                         }
                     );
 
@@ -446,7 +505,7 @@ export default {
             }
 
             // ==================================================
-            // ACTUALIZAR PROGRESO
+            // PROGRESO FINAL
             // ==================================================
 
             await delay(800);
@@ -462,6 +521,10 @@ export default {
 
                     edit: key
                 }
+            );
+
+            console.log(
+                `[TG] ✅ Mensaje enviado por ${senderName}: ${mensaje}`
             );
 
         } catch (error) {
