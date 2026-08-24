@@ -417,15 +417,25 @@ telegramClient.addEventHandler(
                 // SI TIENE BOTONES
                 // ------------------------------------------
 
-                const botones =
-                    obtenerBotonesTelegram(msg);
-
-                if (botones.length) {
-
-                    await enviarTecladoWhatsApp(msg);
-
-                    return;
-                }
+                console.log("========== TELEGRAM DEBUG ==========");
+console.log("Texto:", msg.message);
+console.log(
+    "ReplyMarkup:",
+    JSON.stringify(
+        msg.replyMarkup,
+        (key, value) => {
+            if (Buffer.isBuffer(value)) {
+                return {
+                    type: "Buffer",
+                    data: [...value]
+                };
+            }
+            return value;
+        },
+        2
+    )
+);
+console.log("====================================");
 
                 // ------------------------------------------
                 // SIN MEDIA
