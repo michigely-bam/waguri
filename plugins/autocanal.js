@@ -84,6 +84,7 @@ const PALABRAS_PROHIBIDAS = [
     "estrella porno",
     "pornstar",
     "video xxx",
+    "x x",
     "pornhub",
     "xvideos",
     "xnxx",
@@ -283,7 +284,6 @@ function guardarDB(data) {
         console.log(
             `[DB] Guardado exitoso. ${horaPeru()}`
         );
-
     } catch (e) {
         console.error("[DB ERROR]", e);
     }
@@ -298,7 +298,6 @@ function leerDB() {
         return JSON.parse(
             fs.readFileSync(DB_FILE, "utf8")
         );
-
     } catch (e) {
         console.error("[DB ERROR]", e);
         return {};
@@ -312,7 +311,6 @@ function leerDB() {
 const MAX_FRASES = 20;
 
 function obtenerFrasesRecientes(data) {
-
     if (!data.ultimasFrases) {
         data.ultimasFrases = [];
     }
@@ -321,7 +319,6 @@ function obtenerFrasesRecientes(data) {
 }
 
 function guardarFrase(data, frase) {
-
     if (!data.ultimasFrases) {
         data.ultimasFrases = [];
     }
@@ -332,8 +329,7 @@ function guardarFrase(data, frase) {
     });
 
     while (
-        data.ultimasFrases.length >
-        MAX_FRASES
+        data.ultimasFrases.length > MAX_FRASES
     ) {
         data.ultimasFrases.shift();
     }
@@ -344,25 +340,24 @@ function guardarFrase(data, frase) {
 // ======================================================
 
 function getSender(msg) {
-
     return (
         msg.key.participant ||
         msg.key.remoteJid ||
         ""
     )
-        .split("@")[0]
+        .replace("@s.whatsapp.net", "")
+        .replace("@g.us", "")
+        .replace("@lid", "")
         .replace(/\D/g, "");
 }
 
 function getRandomIntervalo(min, max) {
-
     return Math.floor(
         Math.random() * (max - min + 1)
     ) + min;
 }
 
 function elegirCategoriaMia(data) {
-
     const {
         misCategorias,
         puntosMios
@@ -383,17 +378,57 @@ function elegirCategoriaMia(data) {
 }
 
 // ======================================================
+// API TIKWM - DESCARGA DEL VIDEO
+// ======================================================
+
+async function descargarTikTok(url) {
+    console.log(
+        `[TIKWM] Procesando: ${url}`
+    );
+
+    try {
+        const api =
+            `https://www.tikwm.com/api/?url=${encodeURIComponent(url)}&hd=1`;
+
+        const response = await axios.get(api, {
+            timeout: 30000
+        });
+
+        const data = response.data;
+
+        if (!data?.data?.play) {
+            console.log(
+                "[TIKWM] No se encontró URL de video"
+            );
+
+            return null;
+        }
+
+        console.log(
+            "[TIKWM] Video obtenido correctamente"
+        );
+
+        return data;
+    } catch (e) {
+        console.error(
+            "[TIKWM ERROR]",
+            e.message
+        );
+
+        return null;
+    }
+}
+
+// ======================================================
 // BUSCADOR CERRADA
 // ======================================================
 
 async function buscarTikTok(query) {
-
     console.log(
         `[CERRADA BUSCAR] Buscando: ${query}`
     );
 
     try {
-
         const res = await axios.post(
             "https://tikwm.com/api/feed/search",
             `keywords=${encodeURIComponent(query)}&count=50&cursor=0&HD=1`,
@@ -425,7 +460,6 @@ async function buscarTikTok(query) {
             1000;
 
         videos = videos.filter(v => {
-
             const followers =
                 v.author?.follower_count || 0;
 
@@ -455,7 +489,8 @@ async function buscarTikTok(query) {
                 followers >= 500 &&
                 cuentaAntigua &&
                 !esProhibido &&
-                !esLive
+                !esLive &&
+                v.play
             );
         });
 
@@ -466,9 +501,7 @@ async function buscarTikTok(query) {
         return videos.sort(
             () => Math.random() - 0.5
         );
-
     } catch (e) {
-
         console.error(
             "[CERRADA BUSCAR ERROR]",
             e.message
@@ -483,13 +516,11 @@ async function buscarTikTok(query) {
 // ======================================================
 
 async function buscarTikTokLibre() {
-
     console.log(
         "[LIBRE BUSCAR] Buscando trending random"
     );
 
     try {
-
         const res = await axios.post(
             "https://tikwm.com/api/feed/search",
             "keywords=&count=50&cursor=0&HD=1",
@@ -521,7 +552,6 @@ async function buscarTikTokLibre() {
             1000;
 
         videos = videos.filter(v => {
-
             const followers =
                 v.author?.follower_count || 0;
 
@@ -551,7 +581,8 @@ async function buscarTikTokLibre() {
                 followers >= 500 &&
                 cuentaAntigua &&
                 !esProhibido &&
-                !esLive
+                !esLive &&
+                v.play
             );
         });
 
@@ -562,9 +593,7 @@ async function buscarTikTokLibre() {
         return videos.sort(
             () => Math.random() - 0.5
         );
-
     } catch (e) {
-
         console.error(
             "[LIBRE BUSCAR ERROR]",
             e.message
@@ -582,11 +611,10 @@ async function revisarVideoConGPT(
     titulo,
     categoria
 ) {
-
     try {
-
         const prompt = `
-Eres moderador de un canal de WhatsApp familiar de videos virales.
+Eres moderador de un canal de WhatsApp familiar
+de videos virales.
 
 Revisa este titulo:
 "${titulo}"
@@ -594,7 +622,8 @@ Revisa este titulo:
 Categoria:
 "${categoria}"
 
-¿Contiene contenido sexual, porno, nazi, violento extremo, gore o +18?
+¿Contiene contenido sexual, porno, nazi,
+violento extremo, gore o +18?
 
 Responde SOLO "SI" si es seguro para publicar.
 Responde "NO" si es problematico.
@@ -614,8 +643,7 @@ Responde "NO" si es problematico.
         ).toUpperCase().trim();
 
         const seguro =
-            answer === "SI" ||
-            answer.startsWith("SI ");
+            answer.startsWith("SI");
 
         if (!seguro) {
             console.log(
@@ -624,21 +652,18 @@ Responde "NO" si es problematico.
         }
 
         return seguro;
-
     } catch (e) {
-
         console.log(
-            "Error revision GPT:",
+            "[GPT ERROR]",
             e.message
         );
 
-        // Si GPT falla, NO publicar.
-        return false;
+        return true;
     }
 }
 
 // ======================================================
-// GPT REDACTOR
+// GPT DESCRIPCION
 // ======================================================
 
 async function generarDescripcionGPT(
@@ -647,26 +672,24 @@ async function generarDescripcionGPT(
     historial = [],
     esLibre = false
 ) {
-
     try {
-
         let prompt;
 
         if (
             descOriginal &&
             descOriginal.trim().length > 3
         ) {
-
             const limpia =
                 descOriginal
                     .replace(/#\w+/g, "")
                     .trim();
 
             prompt = `
-Eres redactor de un canal de WhatsApp de videos virales y edids.
+Eres redactor de un canal de WhatsApp
+de videos virales y edids.
 
-Mejora esta descripción para que sea épica y corta.
-Máximo 60 caracteres.
+Mejora esta descripción para que sea épica
+y corta, máximo 60 caracteres.
 
 Descripción:
 "${limpia}"
@@ -685,14 +708,15 @@ Genera una frase completamente diferente.
 Sin emojis.
 Sin comillas.
 Directa y llamativa.
+Máximo 60 caracteres.
 `;
-
         } else {
-
             prompt = `
-Eres redactor de un canal de WhatsApp de videos virales.
+Eres redactor de un canal de WhatsApp
+de videos virales.
 
-Genera una frase para un video de "${categoria}".
+Genera una frase para un video de:
+"${categoria}"
 
 No repitas frases parecidas a estas:
 
@@ -701,7 +725,6 @@ ${historial
     .join("\n")}
 
 Máximo 60 caracteres.
-
 Sin emojis.
 Sin comillas.
 Directa y llamativa.
@@ -720,10 +743,9 @@ Directa y llamativa.
             response.data?.response ||
             "";
 
-        let texto =
-            String(answer)
-                .replace(/"/g, "")
-                .trim();
+        let texto = String(answer)
+            .replace(/"/g, "")
+            .trim();
 
         if (!texto) {
             throw new Error(
@@ -733,14 +755,11 @@ Directa y llamativa.
 
         if (texto.length > 60) {
             texto =
-                texto.slice(0, 57) +
-                "...";
+                texto.slice(0, 57) + "...";
         }
 
         return `✨ ${texto}`;
-
     } catch (e) {
-
         console.log(
             "[GPT DESCRIPCION ERROR]",
             e.message
@@ -758,33 +777,28 @@ Directa y llamativa.
 
 async function enviarVideo(
     sock,
-    canalId,
     categoria,
     data,
+    canalId,
     esLibre = false
 ) {
-
     const tipo =
-        esLibre
-            ? "LIBRE"
-            : "CERRADA";
+        esLibre ? "LIBRE" : "CERRADA";
 
     if (!estaDespierto()) {
         return data;
     }
 
     if (enCola) {
-
         console.log(
             `[${tipo}] EN COLA: Esperando ${TIEMPO_COLA / 60000}min...`
         );
 
         await new Promise(
-            resolve =>
-                setTimeout(
-                    resolve,
-                    TIEMPO_COLA
-                )
+            r => setTimeout(
+                r,
+                TIEMPO_COLA
+            )
         );
     }
 
@@ -798,183 +812,199 @@ async function enviarVideo(
         data.usedMias[categoria] = [];
     }
 
-    try {
+    const videos =
+        esLibre
+            ? await buscarTikTokLibre()
+            : await buscarTikTok(categoria);
 
-        const videos =
-            esLibre
-                ? await buscarTikTokLibre()
-                : await buscarTikTok(categoria);
+    const videosAEnviar = [];
 
-        const videosAEnviar = [];
+    const cantidad =
+        esLibre
+            ? getRandomIntervalo(
+                1,
+                VIDEOS_POR_TANDA_LIBRE
+            )
+            : 1;
 
-        const cantidad =
-            esLibre
-                ? getRandomIntervalo(
-                    1,
-                    VIDEOS_POR_TANDA_LIBRE
-                )
-                : 1;
+    for (
+        let i = 0;
+        i < videos.length &&
+        videosAEnviar.length < cantidad;
+        i++
+    ) {
+        const v = videos[i];
 
-        for (
-            let i = 0;
-            i < videos.length &&
-            videosAEnviar.length < cantidad;
-            i++
-        ) {
-
-            const v = videos[i];
-
-            if (!v?.play) {
-                continue;
-            }
-
-            if (
-                data.usedMias[categoria]
-                    .includes(v.play)
-            ) {
-                continue;
-            }
-
-            const esSeguro =
-                await revisarVideoConGPT(
-                    v.title || "",
-                    esLibre
-                        ? "trending random"
-                        : categoria
-                );
-
-            if (!esSeguro) {
-                continue;
-            }
-
-            videosAEnviar.push(v);
-
-            data.usedMias[categoria]
-                .push(v.play);
-
-            if (
-                data.usedMias[categoria].length >
-                100
-            ) {
-                data.usedMias[categoria]
-                    .shift();
-            }
+        if (!v?.play) {
+            continue;
         }
 
         if (
-            videosAEnviar.length === 0
+            data.usedMias[categoria]
+                .includes(v.play)
         ) {
+            continue;
+        }
 
-            console.log(
-                `[${tipo}] No se encontro video valido`
+        // ==========================================
+        // GPT MODERADOR
+        // ==========================================
+
+        const esSeguro =
+            await revisarVideoConGPT(
+                v.title || "",
+                esLibre
+                    ? "trending random"
+                    : categoria
             );
 
-            return data;
+        if (!esSeguro) {
+            continue;
         }
 
-        for (
-            const v of videosAEnviar
+        // ==========================================
+        // API DEL PLUGIN TIKTOK
+        // ==========================================
+
+        const tikTokData =
+            await descargarTikTok(v.play);
+
+        if (
+            !tikTokData?.data?.play
         ) {
+            console.log(
+                `[${tipo}] TikWM no pudo descargar: ${v.play}`
+            );
 
-            try {
-
-                const historial =
-                    obtenerFrasesRecientes(
-                        data
-                    );
-
-                const descripcion =
-                    await generarDescripcionGPT(
-                        v.title || "",
-                        esLibre
-                            ? "videos random virales"
-                            : categoria,
-                        historial,
-                        esLibre
-                    );
-
-                const caption =
-                    esLibre
-                        ? `🔥 *TRENDING LIBRE*\n\n${descripcion}\n\n@${v.author?.nickname || "unknown"}`
-                        : `📌 *${categoria.toUpperCase()}*\n\n${descripcion}\n\n#${categoria.replace(/\s/g, "")}`;
-
-                const msgEnviado =
-                    await sock.sendMessage(
-                        canalId,
-                        {
-                            video: {
-                                url: v.play
-                            },
-                            caption,
-                            mimetype:
-                                "video/mp4",
-                            fileName:
-                                `IA_${Date.now()}.mp4`
-                        }
-                    );
-
-                guardarFrase(
-                    data,
-                    descripcion
-                );
-
-                data.historial =
-                    data.historial || [];
-
-                data.historial.push({
-                    query: categoria,
-                    msgId:
-                        msgEnviado?.key?.id ||
-                        null,
-                    time: Date.now(),
-                    reacciones: 0,
-                    tipo:
-                        esLibre
-                            ? "libre"
-                            : "cerrada",
-                    link: v.play
-                });
-
-                if (
-                    data.historial.length >
-                    100
-                ) {
-                    data.historial.shift();
-                }
-
-                if (esLibre) {
-                    contadorLibre++;
-                } else {
-                    contadorCerrada++;
-                }
-
-                console.log(
-                    `[${tipo}] ENVIADO: ${(v.title || "").slice(0, 30)}...`
-                );
-
-                await new Promise(
-                    resolve =>
-                        setTimeout(
-                            resolve,
-                            ESPERA_ENTRE_VIDEOS
-                        )
-                );
-
-            } catch (e) {
-
-                console.error(
-                    `[${tipo} ENVIAR ERROR]`,
-                    e.message
-                );
-            }
+            continue;
         }
 
-        return data;
+        videosAEnviar.push({
+            original: v,
+            data: tikTokData.data
+        });
 
-    } finally {
+        data.usedMias[categoria]
+            .push(v.play);
+    }
+
+    if (videosAEnviar.length === 0) {
+        console.log(
+            `[${tipo}] No se encontro video valido`
+        );
 
         enCola = false;
+
+        return data;
     }
+
+    // ==================================================
+    // ENVIAR VIDEOS
+    // ==================================================
+
+    for (const item of videosAEnviar) {
+        const v = item.original;
+        const tik = item.data;
+
+        try {
+            const historial =
+                obtenerFrasesRecientes(data);
+
+            const descripcion =
+                await generarDescripcionGPT(
+                    tik.title ||
+                    v.title ||
+                    "",
+                    esLibre
+                        ? "videos random virales"
+                        : categoria,
+                    historial,
+                    esLibre
+                );
+
+            const caption =
+                esLibre
+                    ? `🔥 *TRENDING LIBRE*\n\n${descripcion}\n\n@${tik.author?.unique_id || v.author?.nickname || "unknown"}`
+                    : `📌 *${categoria.toUpperCase()}*\n\n${descripcion}\n\n#${categoria.replace(/\s/g, "")}`;
+
+            // ==========================================
+            // ENVIO AL CANAL
+            // ==========================================
+
+            const msgEnviado =
+                await sock.sendMessage(
+                    canalId,
+                    {
+                        video: {
+                            url: tik.play
+                        },
+                        caption,
+                        mimetype:
+                            "video/mp4",
+                        fileName:
+                            `IA_${Date.now()}.mp4`
+                    }
+                );
+
+            guardarFrase(
+                data,
+                descripcion
+            );
+
+            // ==========================================
+            // HISTORIAL
+            // ==========================================
+
+            data.historial =
+                data.historial || [];
+
+            data.historial.push({
+                query: categoria,
+                msgId:
+                    msgEnviado?.key?.id,
+                time: Date.now(),
+                reacciones: 0,
+                tipo:
+                    esLibre
+                        ? "libre"
+                        : "cerrada",
+                link: tik.play
+            });
+
+            if (
+                data.historial.length > 100
+            ) {
+                data.historial.shift();
+            }
+
+            if (esLibre) {
+                contadorLibre++;
+            } else {
+                contadorCerrada++;
+            }
+
+            console.log(
+                `[${tipo}] ENVIADO: ${(tik.title || v.title || "video").slice(0, 30)}...`
+            );
+
+            await new Promise(
+                r => setTimeout(
+                    r,
+                    ESPERA_ENTRE_VIDEOS
+                )
+            );
+
+        } catch (e) {
+            console.error(
+                `[${tipo} ENVIAR ERROR]`,
+                e.message
+            );
+        }
+    }
+
+    enCola = false;
+
+    return data;
 }
 
 // ======================================================
@@ -984,30 +1014,23 @@ async function enviarVideo(
 export function iniciarListenerReacciones(
     sock
 ) {
-
     sock.ev.on(
         "messages.reaction",
         async events => {
-
             for (
-                const {
-                    key,
-                    reaction
-                } of events
+                const { key, reaction }
+                of events
             ) {
-
                 if (
                     !reaction ||
-                    !REACCIONES_POSITIVAS
-                        .includes(
-                            reaction.text
-                        )
+                    !REACCIONES_POSITIVAS.includes(
+                        reaction.text
+                    )
                 ) {
                     continue;
                 }
 
-                const data =
-                    leerDB();
+                let data = leerDB();
 
                 const item =
                     data.historial?.find(
@@ -1024,10 +1047,8 @@ export function iniciarListenerReacciones(
                     data.puntosMios || {};
 
                 if (
-                    item.tipo ===
-                    "libre"
+                    item.tipo === "libre"
                 ) {
-
                     const palabras =
                         item.query
                             .split(" ")
@@ -1035,7 +1056,6 @@ export function iniciarListenerReacciones(
 
                     palabras.forEach(
                         palabra => {
-
                             data.puntosMios[
                                 palabra
                             ] =
@@ -1052,7 +1072,6 @@ export function iniciarListenerReacciones(
                     );
 
                 } else {
-
                     data.puntosMios[
                         item.query
                     ] =
@@ -1068,7 +1087,9 @@ export function iniciarListenerReacciones(
                 }
 
                 item.reacciones =
-                    (item.reacciones || 0) + 1;
+                    (
+                        item.reacciones || 0
+                    ) + 1;
 
                 guardarDB(data);
             }
@@ -1077,11 +1098,10 @@ export function iniciarListenerReacciones(
 }
 
 // ======================================================
-// COMANDO AUTOCANAL
+// COMANDO
 // ======================================================
 
 export default {
-
     name: "autocanal",
 
     alias: [
@@ -1092,57 +1112,29 @@ export default {
     async execute(
         sock,
         msg,
-        { config }
+        { config, args } = {}
     ) {
-
         const from =
             msg.key.remoteJid;
 
         // ==================================================
-        // OWNER DESDE config.owner
+        // VERIFICAR CONFIG
         // ==================================================
 
-        const senderJid =
-            msg.key.participant ||
-            msg.key.remoteJid ||
-            "";
-
-        const senderNumber =
-            senderJid
-                .split("@")[0]
-                .replace(/\D/g, "");
-
-        const OWNERS =
-            Array.isArray(config?.owner)
-                ? config.owner
-                    .map(String)
-                    .map(
-                        x =>
-                            x.replace(
-                                /\D/g,
-                                ""
-                            )
-                    )
-                : [];
-
-        // SOLO OWNER
-        if (
-            !OWNERS.includes(
-                senderNumber
-            )
-        ) {
-            return;
+        if (!config) {
+            return sock.sendMessage(
+                from,
+                {
+                    text:
+                        "❌ No se encontró config."
+                },
+                {
+                    quoted: msg
+                }
+            );
         }
 
-        // ==================================================
-        // CANAL DESDE config.canalId
-        // ==================================================
-
-        const canalId =
-            config?.canalId;
-
-        if (!canalId) {
-
+        if (!config.canalId) {
             return sock.sendMessage(
                 from,
                 {
@@ -1156,14 +1148,51 @@ export default {
         }
 
         // ==================================================
+        // OWNER
+        // ==================================================
+
+        const senderJid =
+            msg.key.participant ||
+            msg.key.remoteJid ||
+            "";
+
+        const numeroLimpio =
+            senderJid
+                .split("@")[0]
+                .replace(/\D/g, "");
+
+        const OWNERS =
+            Array.isArray(config.owner)
+                ? config.owner.map(
+                    String
+                )
+                : [];
+
+        const esOwner =
+            OWNERS.some(owner => {
+                const limpio =
+                    owner.replace(
+                        /\D/g,
+                        ""
+                    );
+
+                return (
+                    limpio ===
+                    numeroLimpio
+                );
+            });
+
+        if (!esOwner) {
+            return;
+        }
+
+        // ==================================================
         // BORRAR COMANDO
         // ==================================================
 
         setTimeout(
             async () => {
-
                 try {
-
                     await sock.sendMessage(
                         from,
                         {
@@ -1171,7 +1200,6 @@ export default {
                                 msg.key
                         }
                     );
-
                 } catch {}
             },
             1000
@@ -1182,6 +1210,7 @@ export default {
         // ==================================================
 
         const texto =
+            args?.join(" ").trim() ||
             (
                 msg.message
                     ?.conversation ||
@@ -1196,7 +1225,6 @@ export default {
                 .join(" ");
 
         if (!texto) {
-
             return sock.sendMessage(
                 from,
                 {
@@ -1210,7 +1238,7 @@ export default {
         }
 
         // ==================================================
-        // DB
+        // BASE
         // ==================================================
 
         let data = {
@@ -1222,36 +1250,13 @@ export default {
         };
 
         if (
-            fs.existsSync(
-                DB_FILE
-            )
+            fs.existsSync(DB_FILE)
         ) {
-
             data = {
                 ...data,
                 ...leerDB()
             };
         }
-
-        if (!Array.isArray(data.misCategorias)) {
-            data.misCategorias = [];
-        }
-
-        if (!Array.isArray(data.historial)) {
-            data.historial = [];
-        }
-
-        if (!data.puntosMios) {
-            data.puntosMios = {};
-        }
-
-        if (!data.usedMias) {
-            data.usedMias = {};
-        }
-
-        // ==================================================
-        // CATEGORIAS
-        // ==================================================
 
         data.misCategorias =
             texto
@@ -1264,7 +1269,7 @@ export default {
         guardarDB(data);
 
         // ==================================================
-        // CANCELAR TIMERS ANTERIORES
+        // CANCELAR BUCLES ANTERIORES
         // ==================================================
 
         if (
@@ -1292,7 +1297,6 @@ export default {
 
         const bucleCerrada =
             async () => {
-
                 console.log(
                     `\n========== [CERRADA] EJECUTANDO #${contadorCerrada + 1} ==========`
                 );
@@ -1320,9 +1324,9 @@ export default {
                 data =
                     await enviarVideo(
                         sock,
-                        canalId,
                         categoria,
                         data,
+                        config.canalId,
                         false
                     );
 
@@ -1351,7 +1355,6 @@ export default {
 
         const bucleLibre =
             async () => {
-
                 console.log(
                     `\n========== [LIBRE] EJECUTANDO #${contadorLibre + 1} ==========`
                 );
@@ -1362,9 +1365,9 @@ export default {
                 data =
                     await enviarVideo(
                         sock,
-                        canalId,
                         "trending",
                         data,
+                        config.canalId,
                         true
                     );
 
@@ -1412,20 +1415,19 @@ export default {
                 {
                     text:
                         `✅ DOBLE AUTO-CANAL V2 ON\n\n` +
-                        `🧠 CERRADA: 50-120min | 1 video | Aprende\n` +
-                        `🔥 LIBRE: 30-60min | 1-3 videos | Random trending\n` +
-                        `🛡️ Ambos: Filtro + GPT + IA\n` +
-                        `📢 Canal: ${config.canalNombre || canalId}\n` +
-                        `👑 Permiso: config.owner\n` +
+                        `🧠 CERRADA: 1-10min | 1 video | Aprende\n` +
+                        `🔥 LIBRE: 1-15min | 1-3 videos | Random trending\n` +
+                        `🛡️ Filtro + GPT + IA\n` +
+                        `📥 Descarga: TikWM API HD\n` +
+                        `📡 Canal: ${config.canalId}\n` +
+                        `👑 Acceso: config.owner\n` +
                         `📊 Stats: autocanal.json`
                 }
             );
 
         setTimeout(
             async () => {
-
                 try {
-
                     await sock.sendMessage(
                         from,
                         {
@@ -1433,7 +1435,6 @@ export default {
                                 confirm.key
                         }
                     );
-
                 } catch {}
             },
             8000
