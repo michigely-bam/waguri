@@ -5,7 +5,7 @@ export default {
     // Identidad
     botname: 'waguri',
     packname: 'waguri',
-    wm: 'Miku',
+    wm: 'waguri',
     author: 'Michigely_bam',
 
     prefix: '/',
