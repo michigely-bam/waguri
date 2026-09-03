@@ -1,10 +1,10 @@
 export default {
-    nombre: '`𓆩♡𓆪 𝕄𝕚𝕜𝕦 𓆩♡𓆪`',
-    nombre2: '`✧･ﾟ: _𝙼𝚒𝚔𝚞 𝙽𝚊𝚔𝚊𝚗𝚘_:･ﾟ✧`',
+    nombre: '`𓆩♡𓆪 waguri 𓆩♡𓆪`',
+    nombre2: '`✧･ﾟ: _waguri kaoruko_:･ﾟ✧`',
 
     // Identidad
-    botname: 'Miku',
-    packname: 'Miku',
+    botname: 'waguri',
+    packname: 'waguri',
     wm: 'Miku',
     author: 'Michigely_bam',
 
