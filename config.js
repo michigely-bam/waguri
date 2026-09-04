@@ -9,7 +9,7 @@ export default {
     author: 'Michigely_bam',
 
     prefix: '#',
-    banner: 'https://files.catbox.moe/z15if9.mp4',
+    banner: '',
 
     // Owners para poner onwer se deve poner lid por q WhatsApp ya no lee numeros telefónicos por la actualización de nkmbres de usuario
     botowner: ['140888466575588', '73573527994572', '59174642215', ,'37031996583942', '270351682527443'],
