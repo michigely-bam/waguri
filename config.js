@@ -8,7 +8,7 @@ export default {
     wm: 'waguri',
     author: 'Michigely_bam',
 
-    prefix: '.',
+    prefix: '#',
     banner: 'https://files.catbox.moe/z15if9.mp4',
 
     // Owners para poner onwer se deve poner lid por q WhatsApp ya no lee numeros telefónicos por la actualización de nkmbres de usuario
