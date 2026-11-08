@@ -12,8 +12,8 @@ export default {
     banner: '',
 
     // Owners para poner onwer se deve poner lid por q WhatsApp ya no lee numeros telefónicos por la actualización de nkmbres de usuario
-    botowner: ['207563673047206', '73573527994572', '59174642215', ,'37031996583942', '270351682527443'],
-    owner: ['207563673047206', '51924090815', '73573527994572', '59174642215', '37031996583942', '270351682527443'],
+    botowner: ['207563673047206', '73573527994572', '380970121849'],
+    owner: ['207563673047206', '380970121849'],
 
     // Nuevos permisos - ponwe lid 
     mods: ['140888466575588', '51940725864', '249129212266', '270351682527443'],
