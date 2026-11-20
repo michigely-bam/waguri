@@ -22,7 +22,7 @@
     "@mrnima/instagram-downloader": "^1.0.0",
     "@napi-rs/canvas": "^0.1.44",
     "@vitalets/google-translate-api": "^9.2.1",
-    "@whiskeysockets/baileys": "git@github.com:Andresv27728/baileys-beta.git",
+    "@whiskeysockets/baileys": "git@github.com:LuferOS/Baileys-Rust.git",
     "adm-zip": "^0.5.17",
     "aptoide-scraper": "^1.0.1",
     "awesome-phonenumber": "^7.5.0",
